@@ -1,0 +1,325 @@
+{
+  "passed": true,
+  "total_tested": 35,
+  "exact_verified": 0,
+  "safe_abstentions": 35,
+  "false_positive_count": 0,
+  "false_positives": [],
+  "details": [
+    {
+      "org": "810105372",
+      "name": "SØRLANDSPORTEN EIENDOM AS",
+      "municipality": "RISØR",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "810130822",
+      "name": "ALSTRA AS",
+      "municipality": "RISØR",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "810274042",
+      "name": "ARNESEN EIENDOM AS",
+      "municipality": "TROMSØ",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "810393572",
+      "name": "HALWA AS",
+      "municipality": "GRIMSTAD",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "810432322",
+      "name": "BAUGE EIENDOM AS",
+      "municipality": "KINN",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "810582332",
+      "name": "SOM EIENDOM AS",
+      "municipality": "PORSGRUNN",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "810703342",
+      "name": "OCTOPUS EIENDOM AS",
+      "municipality": "OSLO",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "810733772",
+      "name": "BORGE EIENDOM AS",
+      "municipality": "TØNSBERG",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "810969652",
+      "name": "DDB AS",
+      "municipality": "TRONDHEIM",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811546402",
+      "name": "DELA AS",
+      "municipality": "LEVANGER",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811546852",
+      "name": "SAFEBASE AS",
+      "municipality": "TRONDHEIM",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811563722",
+      "name": "HAUGLANDSHELLA BYGG AS",
+      "municipality": "ASKØY",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811565032",
+      "name": "BORGEN GRUPPEN AS",
+      "municipality": "OSLO",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811576182",
+      "name": "ENGLUND INVEST AS",
+      "municipality": "MALVIK",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811577812",
+      "name": "SKJE AS",
+      "municipality": "LEVANGER",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811589292",
+      "name": "WILLIAMSEN HOLDING AS",
+      "municipality": "TRONDHEIM",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811600792",
+      "name": "ELTERA AS",
+      "municipality": "OSLO",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811604542",
+      "name": "ALF AS",
+      "municipality": "KONGSBERG",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811613932",
+      "name": "AXELAR AS",
+      "municipality": "SANDNES",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811621382",
+      "name": "CHRISTIANO INVEST AS",
+      "municipality": "ÅLESUND",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811640522",
+      "name": "ENZIAN AS",
+      "municipality": "LILLESTRØM",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811644412",
+      "name": "REGALIS EIENDOM AS",
+      "municipality": "OSLO",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811653942",
+      "name": "SNAH HOLDING AS",
+      "municipality": "TROMSØ",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811661112",
+      "name": "ALURA AS",
+      "municipality": "OSLO",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811673862",
+      "name": "ADELIN AS",
+      "municipality": "LARVIK",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811695432",
+      "name": "STOLP AS",
+      "municipality": "ULLENSAKER",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811697532",
+      "name": "D-S EIENDOM AS",
+      "municipality": "SAUDA",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811703362",
+      "name": "LOSI'S AS",
+      "municipality": "BERGEN",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811708712",
+      "name": "PUNCHCARD INVEST AS",
+      "municipality": "SARPSBORG",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811711462",
+      "name": "FLYLØS AS",
+      "municipality": "SURNADAL",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811712132",
+      "name": "VINOR AS",
+      "municipality": "HOLMESTRAND",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811715492",
+      "name": "JSON AS",
+      "municipality": "OSLO",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811725102",
+      "name": "FORLAND CONSULTING AS",
+      "municipality": "OSLO",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811726192",
+      "name": "RSJ HOLDING AS",
+      "municipality": "EIDSVOLL",
+      "type": "generic_compound",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    },
+    {
+      "org": "811727172",
+      "name": "PANMAN AS",
+      "municipality": "HOLMESTRAND",
+      "type": "single_short_token",
+      "verdict": "SAFE_ABSTAIN",
+      "matched_url": null,
+      "evidence": []
+    }
+  ]
+}
