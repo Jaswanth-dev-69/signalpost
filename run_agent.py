@@ -34,7 +34,7 @@ from norway_company_agent.discovery import choose_search_candidate  # noqa: E402
 from norway_company_agent.domain_solver import discover_website_by_domain_search  # noqa: E402
 from norway_company_agent.evidence import utc_now  # noqa: E402
 from norway_company_agent.identity import apply_website_identity_gate  # noqa: E402
-from norway_company_agent.official import fetch_official_modules  # noqa: E402
+from norway_company_agent.official import accounting_obligation_assessment, fetch_official_modules  # noqa: E402
 from norway_company_agent.synthesis import generate_company_synthesis  # noqa: E402
 from norway_company_agent.website import fetch_website  # noqa: E402
 from scripts.build_prototype import build as build_viewer_html  # noqa: E402
@@ -63,6 +63,34 @@ def enrich_company_profile(
     # 1. Fetch official registry modules
     records, metrics = fetch_official_modules(org, fetch_modules)
     profile.setdefault("evidence", {}).update(records)
+
+    if profile.get("missing_from_snapshot"):
+        live_rec = records.get("registry_live")
+        if live_rec and live_rec.get("status") == "available" and live_rec.get("value"):
+            lv = live_rec["value"]
+            profile["name"] = lv.get("navn", profile.get("name"))
+            profile["legal_form"] = (lv.get("organisasjonsform") or {}).get("kode")
+            profile["employees"] = lv.get("antallAnsatte")
+            profile["bankrupt"] = lv.get("konkurs", False)
+            profile["liquidating"] = lv.get("underAvvikling", False) or lv.get("underTvangsavviklingEllerTvangsopplosning", False)
+            for_adr = lv.get("forretningsadresse") or lv.get("postadresse") or {}
+            profile["municipality"] = for_adr.get("kommune")
+            profile["municipality_number"] = for_adr.get("kommunenummer")
+            naering = lv.get("naeringskode1") or {}
+            profile["industry_code"] = naering.get("kode")
+            profile["industry_label"] = naering.get("beskrivelse")
+            profile["website"] = lv.get("hjemmeside")
+            profile["evidence"]["registry"] = live_rec
+        else:
+            profile["evidence"]["registry"] = {
+                "field": "registry",
+                "status": "not_found",
+                "source_type": "official_registry_live",
+                "source_url": f"https://data.brreg.no/enhetsregisteret/api/enheter/{org}",
+                "retrieved_at": utc_now(),
+                "note": "Organisation not found in official registry",
+            }
+        profile["evidence"]["accounting_obligation"] = accounting_obligation_assessment(profile)
     
     total_requests = len(metrics)
     total_bytes = sum(item.bytes_received for item in metrics)

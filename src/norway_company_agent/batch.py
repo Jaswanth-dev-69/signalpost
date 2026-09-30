@@ -86,7 +86,24 @@ def profiles_from_bulk(path: str | Path, organisation_numbers: Iterable[str]) ->
             break
     missing = [org for org in requested if org not in found]
     if missing:
-        raise ValueError(f"Organisation numbers absent from registry snapshot: {missing[:10]}")
+        now_ts = utc_now()
+        for org in missing:
+            found[org] = {
+                "organisation_number": org,
+                "name": f"Organisation {org}",
+                "legal_form": None,
+                "employees": None,
+                "bankrupt": None,
+                "liquidating": None,
+                "municipality": None,
+                "municipality_number": None,
+                "industry_code": None,
+                "industry_label": None,
+                "website": None,
+                "latest_submitted_accounts": None,
+                "missing_from_snapshot": True,
+                "evidence": {},
+            }
     return [found[org] for org in requested], {
         "registry_snapshot_sha256": snapshot_sha256,
         "registry_rows_scanned": scanned,
