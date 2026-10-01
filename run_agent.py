@@ -178,9 +178,10 @@ def main() -> None:
     parser.add_argument("--viewer", help="HTML viewer output path (defaults to <output>.viewer.html)")
     parser.add_argument("--run-id", default=f"run-{int(time.time())}")
     parser.add_argument("--expected-count", type=int, default=0, help="Expected organisation count (0 to auto-detect from input)")
-    parser.add_argument("--workers", type=int, default=8, help="Number of concurrent worker threads")
+    parser.add_argument("--workers", type=int, default=16, help="Number of concurrent worker threads")
     parser.add_argument("--timeout", type=float, default=12.0, help="HTTP request timeout in seconds")
     parser.add_argument("--max-runtime", type=float, default=600.0, help="Global maximum runtime before flushing remaining Tier A records")
+    parser.add_argument("--hard-deadline", type=float, default=1500.0, help="Hard stop in seconds: write a result for every company and exit")
     parser.add_argument("--disable-discovery", action="store_true", help="Disable domain candidate discovery for missing websites")
     args = parser.parse_args()
 
@@ -224,6 +225,47 @@ def main() -> None:
             prof["synthesis_summary"] = f"{prof.get('name')} (Org.nr {prof.get('organisation_number')}): Encountered error during enrichment: {exc}"
             return prof, {"error": str(exc)}
 
+    import os
+    import threading
+
+    finalize_lock = threading.Lock()
+    base_profiles = {p_["organisation_number"]: p_ for p_ in profiles}
+
+    def hard_deadline_flush() -> None:
+        if not finalize_lock.acquire(blocking=False):
+            return
+        print("HARD DEADLINE reached: writing a result for every company and exiting.", flush=True)
+        completed = utc_now()
+        final_profiles = []
+        for org in orgs:
+            prof = state.get(org)
+            if prof is None:
+                prof = dict(base_profiles[org])
+                prof["errors"] = [{"error": "hard deadline reached before enrichment finished", "type": "DeadlineExceeded"}]
+            final_profiles.append(prof)
+        envs = [
+            profile_to_contract_envelope(
+                prof,
+                run_id=args.run_id,
+                started_at=started_at,
+                completed_at=completed,
+                terminal_status="completed",
+            )
+            for prof in final_profiles
+        ]
+        write_jsonl(output_path, envs)
+        write_jsonl(
+            Path(args.profiles_output) if args.profiles_output else output_path.with_suffix(".profiles.jsonl"),
+            final_profiles,
+        )
+        print(f"Wrote {len(envs)} envelopes before exit.", flush=True)
+        os._exit(0)
+
+    deadline_in = max(1.0, args.hard_deadline - (time.monotonic() - start_monotonic))
+    watchdog = threading.Timer(deadline_in, hard_deadline_flush)
+    watchdog.daemon = True
+    watchdog.start()
+
     # Process companies in parallel pool with incremental writing
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(safe_enrich, prof): prof["organisation_number"] for prof in profiles}
@@ -249,6 +291,9 @@ def main() -> None:
             stream_handle.write(json.dumps(single_envelope, ensure_ascii=False) + "\n")
             stream_handle.flush()
 
+    if not finalize_lock.acquire(blocking=False):
+        while True:
+            time.sleep(1)
     stream_handle.close()
     if stream_path.exists():
         stream_path.unlink()
