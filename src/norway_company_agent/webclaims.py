@@ -31,7 +31,7 @@ PER_HOST_INTERVAL_S = 0.35
 
 NEWS_SEGMENTS = {
     "aktuelt", "nyheter", "nyhet", "nyheiter", "news", "blogg", "blog", "presse", "pressemeldinger",
-    "siste-nytt", "artikler", "artikkel", "aktuelt-og-nyheter", "nyhetsarkiv",
+    "siste-nytt", "artikler", "artikkel", "aktuelt-og-nyheter", "nyhetsarkiv", "innsikt",
 }
 NEWS_PROBE_PATHS = ("/aktuelt", "/nyheter", "/news", "/blogg")
 NEWS_SKIP_SEGMENTS = {"side", "page", "kategori", "category", "tag", "tags", "author", "forfatter", "feed", "arkiv", "archive"}
@@ -187,6 +187,14 @@ class SiteFetcher:
         except urllib.error.HTTPError as exc:
             if exc.code == 429:
                 RATE_LIMITED["count"] += 1
+                if not getattr(self, "_retried_429", False):
+                    # One polite retry after the site's Retry-After (capped), then give up on it.
+                    self._retried_429 = True
+                    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                    time.sleep(min(5.0, float(retry_after)) if retry_after and retry_after.isdigit() else 3.0)
+                    self.cache.pop(url, None)
+                    self.budget[family] = self.budget.get(family, 1) - 1
+                    return self.get(url, family, accept=accept)
             self.errors.append({"url": url, "error": f"HTTP {exc.code}"})
         except Exception as exc:  # network, TLS, decode
             self.errors.append({"url": url, "error": f"{type(exc).__name__}: {str(exc)[:100]}"})
@@ -364,7 +372,7 @@ def _feed_links(base_url: str, soup: BeautifulSoup) -> list[str]:
 
 # ---------------------------------------------------------------- news
 
-NEWS_TOKENS = {"aktuelt", "nyheter", "nyhet", "nyheiter", "news", "blogg", "blog", "presse", "pressemeldinger", "artikler", "nytt"}
+NEWS_TOKENS = {"aktuelt", "nyheter", "nyhet", "nyheiter", "news", "blogg", "blog", "presse", "pressemeldinger", "artikler", "nytt", "innsikt"}
 
 
 def _news_index(segments: list[str]) -> int | None:
@@ -467,6 +475,52 @@ def _listing_inline_items(listing: dict[str, Any], soup: BeautifulSoup, domain: 
     return list(items.values())
 
 
+def _jsonld_article_items(page: dict[str, Any], soup: BeautifulSoup, domain: str) -> list[dict[str, Any]]:
+    """Articles listed in JSON-LD (ItemList / Blog / NewsArticle nodes) with their own datePublished."""
+    items = []
+    for node in _jsonld_nodes(soup):
+        if not _types(node) & {"NewsArticle", "BlogPosting", "Article", "PressRelease"}:
+            continue
+        url = node.get("url") or node.get("@id") or (node.get("mainEntityOfPage") if isinstance(node.get("mainEntityOfPage"), str) else None)
+        title = " ".join(str(node.get("headline") or node.get("name") or "").split())[:300]
+        published = parse_iso(node.get("datePublished"))
+        if not (url and title and published):
+            continue
+        url = urllib.parse.urldefrag(urllib.parse.urljoin(page["url"], str(url)))[0]
+        if registered_domain(url) != domain or url.rstrip("/") == page["url"].rstrip("/"):
+            continue  # the page's own date belongs to the page, not to a listed item
+        items.append({
+            "title": title, "url": url, "published_date": published, "date_source": "jsonld_list_datePublished",
+            "source_page": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
+            "claim_span": f"{title[:200]} | {node.get('datePublished')}",
+        })
+    return items
+
+
+def _wordpress_posts(fetcher: SiteFetcher, home: dict[str, Any], domain: str) -> list[dict[str, Any]]:
+    """WordPress REST API: posts carry their real publication date."""
+    url = urllib.parse.urljoin(home["url"], "/wp-json/wp/v2/posts?per_page=10&_fields=date,link,title")
+    page = fetcher.get(url, "news", accept="application/json")
+    if not page or "json" not in page.get("content_type", ""):
+        return []
+    try:
+        posts = json.loads(page["raw"])
+    except ValueError:
+        return []
+    items = []
+    for post in posts if isinstance(posts, list) else []:
+        title = BeautifulSoup(str((post.get("title") or {}).get("rendered") or ""), "lxml").get_text(" ", strip=True)[:300]
+        link = str(post.get("link") or "")
+        published = parse_iso(post.get("date"))
+        if title and link and published and registered_domain(link) == domain:
+            items.append({
+                "title": title, "url": link, "published_date": published, "date_source": "wordpress_rest_date",
+                "source_page": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
+                "claim_span": f"{title[:200]} | {post.get('date')}",
+            })
+    return items
+
+
 def _sitemap_article_urls(fetcher: SiteFetcher, home_url: str) -> tuple[list[dict[str, Any]], list[str]]:
     """News sitemaps give real publication dates; plain sitemaps only give article URLs."""
     origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlparse(home_url))
@@ -517,6 +571,10 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
     checked: list[dict[str, Any]] = []
     items: dict[str, dict[str, Any]] = {}
 
+    # Dated teasers already on the homepage cost no extra fetch.
+    for item in _listing_inline_items(home, home_soup, domain) + _jsonld_article_items(home, home_soup, domain):
+        items.setdefault(item["url"], item)
+
     listing_page = None
     for url in listings[:2]:
         listing_page = fetcher.get(url, "news")
@@ -544,15 +602,25 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
                     listing_links = _same_site_links(archive["url"], soup, domain)
                     listing_articles = [u for u, _ in listing_links if is_news_article(u)]
         articles = list(dict.fromkeys(listing_articles + articles))
-        for item in _listing_inline_items(listing_page, soup, domain):
+        for item in _listing_inline_items(listing_page, soup, domain) + _jsonld_article_items(listing_page, soup, domain):
             items.setdefault(item["url"], item)
         text = " ".join(soup.get_text(" ", strip=True).split())
         checked.append({**_page_ref(listing_page), "claim_span": (_title(soup) or "news page") + " | " + text[:160]})
 
     if len(items) < MAX_NEWS_ITEMS:
-        wordpress = b"wp-content" in home["raw"] or b"wp-json" in home["raw"]
-        if not feeds and wordpress:
-            feeds.append(urllib.parse.urljoin(home["url"], "/feed/"))
+        raw_home = home["raw"]
+        wordpress = b"wp-content" in raw_home or b"wp-json" in raw_home
+        if not feeds:
+            # Conventional feed locations, cheapest platform-specific guess first.
+            if wordpress:
+                feeds.append(urllib.parse.urljoin(home["url"], "/feed/"))
+            elif b"wix.com" in raw_home or b"wixstatic" in raw_home:
+                feeds.append(urllib.parse.urljoin(home["url"], "/blog-feed.xml"))
+            elif listing_page is not None and b"squarespace" in raw_home:
+                feeds.append(listing_page["url"].rstrip("/") + "?format=rss")
+            else:
+                feeds.extend(urllib.parse.urljoin(home["url"], p) for p in ("/rss.xml", "/feed"))
+        feed_found = False
         for feed_url in feeds[:2]:
             feed = fetcher.get(feed_url, "news", accept="application/rss+xml,application/atom+xml,application/xml,text/xml")
             if not feed or _is_html(feed):
@@ -561,7 +629,11 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
             for item in feed_items:
                 items.setdefault(item["url"], item)
             if feed_items:
+                feed_found = True
                 break
+        if not feed_found and wordpress and len(items) < MAX_NEWS_ITEMS:
+            for item in _wordpress_posts(fetcher, home, domain):
+                items.setdefault(item["url"], item)
 
     if not items and not articles:
         dated, sitemap_urls = _sitemap_article_urls(fetcher, home["url"])
@@ -602,6 +674,13 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
 
 
 # ---------------------------------------------------------------- jobs
+
+def _word_window(text: str, start: int, end: int, width: int = 60) -> str:
+    """Text around a match, cut at word boundaries so the quote does not start mid-word."""
+    left = text.rfind(" ", 0, max(0, start - width)) + 1 if start > width else 0
+    right = text.find(" ", min(len(text), end + width))
+    return text[left:right if right != -1 else len(text)].strip()
+
 
 def _page_ref(page: dict[str, Any]) -> dict[str, Any]:
     return {"url": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"]}
@@ -734,7 +813,7 @@ def discover_jobs(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
                     "source_page": page["url"],
                     "content_sha256": page["content_sha256"],
                     "retrieved_at": page["retrieved_at"],
-                    "claim_span": f"{title[:200]} | {text[max(0, marker.start() - 60):marker.end() + 60]}",
+                    "claim_span": f"{title[:200]} | {_word_window(text, marker.start(), marker.end())}",
                 })
         text = " ".join(soup.get_text(" ", strip=True).split())
         no_openings = NO_OPENINGS.search(text)
