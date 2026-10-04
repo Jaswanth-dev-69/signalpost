@@ -41,6 +41,7 @@ from norway_company_agent.official import accounting_obligation_assessment, fetc
 from norway_company_agent.synthesis import generate_company_synthesis  # noqa: E402
 from norway_company_agent.website import fetch_website, strip_private_fields  # noqa: E402
 from norway_company_agent.webclaims import crawl_web_claims  # noqa: E402
+from norway_company_agent.nav_jobs import NavJobIndex, attach_postings  # noqa: E402
 from scripts.build_prototype import build as build_viewer_html  # noqa: E402
 
 
@@ -232,11 +233,11 @@ def ensure_bulk_snapshot(bulk_arg: str) -> Path:
             return Path(alt)
 
     # Automatic clean-machine download from official permitted source
-    print(f"Bulk registry snapshot {bulk_arg} not found. Downloading from official BRREG endpoint...")
+    print(f"Bulk registry snapshot {bulk_arg} not found. Downloading from official BRREG endpoint...", flush=True)
     url = "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv"
     target = Path("brreg-enheter.csv.gz")
     urllib.request.urlretrieve(url, target)
-    print(f"Successfully downloaded {target} ({target.stat().st_size // (1024*1024)} MB).")
+    print(f"Successfully downloaded {target} ({target.stat().st_size // (1024*1024)} MB).", flush=True)
     return target
 
 
@@ -258,6 +259,8 @@ def main() -> None:
     parser.add_argument("--web-reserve", type=float, default=90.0, help="Seconds before --hard-deadline after which no new web work starts")
     parser.add_argument("--hard-deadline", type=float, default=1500.0, help="Hard stop in seconds: write a result for every company and exit")
     parser.add_argument("--disable-discovery", action="store_true", help="Disable domain candidate discovery for missing websites")
+    parser.add_argument("--disable-nav-jobs", action="store_true", help="Do not read NAV's public vacancy feed")
+    parser.add_argument("--nav-workers", type=int, default=24, help="Concurrent connections for the NAV vacancy feed index")
     args = parser.parse_args()
 
     # The hard deadline counts total wall time from process start, including a cold bulk download.
@@ -327,6 +330,11 @@ def main() -> None:
     watchdog.daemon = True
     watchdog.start()
 
+    # NAV vacancy index builds in the background during the bulk download and both passes.
+    nav_index = None
+    if not args.disable_nav_jobs:
+        nav_index = NavJobIndex(workers=args.nav_workers, time_budget_s=max(60.0, args.hard_deadline - args.web_reserve - 120.0)).start()
+
     # Ensure bulk registry snapshot exists or download it (inside the deadline).
     bulk_path = ensure_bulk_snapshot(args.bulk)
     profiles, registry_metadata = profiles_from_bulk(bulk_path, orgs)
@@ -379,6 +387,23 @@ def main() -> None:
             state[prof["organisation_number"]] = prof
             if index % 100 == 0 or index == expected_count:
                 print(f"[{utc_now()}] Pass 2 (web): {index}/{expected_count}, elapsed={elapsed():.1f}s", flush=True)
+
+    if nav_index is not None:
+        # Give the index the time left before the deadline reserve, then use what it has.
+        nav_index.wait(max(0.0, args.hard_deadline - args.web_reserve - 60.0 - elapsed()))
+        nav_index.stop()
+        matched = 0
+
+        def attach(org: str) -> int:
+            prof = copy.deepcopy(state[org])
+            count = attach_postings(prof, nav_index)
+            state[org] = prof
+            return count
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            matched = sum(1 for count in pool.map(attach, orgs) if count)
+        print(f"[{utc_now()}] NAV jobs: {json.dumps(nav_index.stats())}; companies with postings={matched}, elapsed={elapsed():.1f}s", flush=True)
+        operations["nav_job_index"] = {**nav_index.stats(), "companies_with_postings": matched}
 
     for prof in state.values():
         m = prof.get("run_metrics", {})

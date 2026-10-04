@@ -4,6 +4,8 @@ import hashlib
 import re
 from typing import Any
 
+from .nav_jobs import company_orgnrs
+
 BULK_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv"
 WEB_FIELDS = ("official_website", "company_description", "social_profiles", "dated_news", "job_postings")
 FINANCIAL_FIELDS = (
@@ -387,6 +389,56 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
     # The registry 'hjemmeside' value (or its absence) is the evidence for non-available web states.
     hjemmeside_ev = registry_evidence("homepage", profile.get("website") or None) if registry_evidence else None
 
+    # Hiring from NAV's public vacancy feed: exact employer organisation-number matches.
+    nav = profile.get("nav_jobs") or {}
+    nav_items, nav_evs = [], []
+    for item in nav.get("postings") or []:
+        page = item.get("page_evidence") or {}
+        if page:
+            ev = add_evidence(page.get("url"), "official_job_register", page.get("retrieved_at"), page.get("content_sha256"), page.get("claim_span"), f"nav_{item['uuid']}")
+        else:
+            ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_span"), f"nav_{item['uuid']}")
+        if ev:
+            nav_items.append({
+                "title": item["title"],
+                "url": item["url"],
+                "posted_date": item.get("published"),
+                "valid_through": item.get("expires"),
+                "platform": "arbeidsplassen.nav.no",
+                "employer_orgnr": item["employer_orgnr"],
+                "source_page": page.get("url") or item.get("entry_url"),
+            })
+            nav_evs.append(ev)
+    sitemap = nav.get("sitemap") or {}
+    nav_checked_ev = None
+    if nav.get("index_complete") and sitemap:
+        nav_checked_ev = add_evidence(
+            sitemap.get("url"), "official_job_register", sitemap.get("retrieved_at"), sitemap.get("content_sha256"),
+            f"{sitemap.get('active_ads')} active ads listed; employer organisation numbers checked: {', '.join(sorted(company_orgnrs(profile))[:5])}",
+            "nav_sitemap",
+        )
+
+    def add_job_claim(postings: list, job_evs: list, fallback_state: str, fallback_confidence: float, fallback_evs: list, site_method: str | None) -> None:
+        merged, evs, seen = [], [], set()
+        for item, ev in [*zip(postings, job_evs), *zip(nav_items, nav_evs)]:
+            key = (item.get("title", "").casefold(), item.get("url"))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            evs.append(ev)
+        if merged:
+            site_confidence = 0.9 * (0.8 if site_method == "registry_declared_domain" else 1.0)
+            claim = add_claim_base("job_postings", merged[:25], "available", 0.95 if nav_items and not postings else site_confidence, evs[:25])
+            claim["verification_method"] = "nav_employer_orgnr" if nav_items and not postings else (site_method or "nav_employer_orgnr")
+        else:
+            states_with_check = fallback_evs + ([nav_checked_ev] if nav_checked_ev and fallback_state == "not_available" else [])
+            claim = add_claim_base("job_postings", None, fallback_state, fallback_confidence, states_with_check)
+            if site_method:
+                claim["verification_method"] = site_method
+
+    add_claim_base = add_claim
+
     method = (web_val.get("identity_assessment") or {}).get("method")
     declared = method == "registry_declared_domain"
     if declared and not hjemmeside_ev:
@@ -467,12 +519,10 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
                 job_evs.append(ev)
         careers = jobs.get("careers_page") if isinstance(jobs.get("careers_page"), dict) else {}
         careers_ev = add_evidence(careers.get("url"), "company_owned", careers.get("retrieved_at"), careers.get("content_sha256"), careers.get("claim_span"), "careers_page") if careers else None
-        if postings:
-            add_claim("job_postings", postings, "available", 0.9, job_evs)
-        elif careers_ev:
-            add_claim("job_postings", None, "not_available", 0.8, [careers_ev])
+        if careers_ev:
+            add_job_claim(postings, job_evs, "not_available", round(0.8 * scale, 3), [careers_ev], verification)
         else:
-            add_claim("job_postings", None, "failed" if deadline_hit else "not_available", 0.6, [web_ev])
+            add_job_claim(postings, job_evs, "failed" if deadline_hit else "not_available", round(0.6 * scale, 3), [web_ev], verification)
         return
 
     if web_status == "available":
@@ -490,4 +540,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
     else:
         state, evs = "not_available", [hjemmeside_ev or entity_ev]
     for field in WEB_FIELDS:
+        if field == "job_postings":
+            add_job_claim([], [], state, 0.3 if state == "ambiguous" else 0.0, evs, None)
+            continue
         add_claim(field, None, state, 0.3 if state == "ambiguous" else 0.0, evs)
