@@ -1,8 +1,8 @@
 {
   "passed": true,
   "total_tested": 35,
-  "exact_verified": 0,
-  "safe_abstentions": 35,
+  "exact_verified": 1,
+  "safe_abstentions": 34,
   "false_positive_count": 0,
   "false_positives": [],
   "details": [
@@ -200,9 +200,11 @@
       "name": "REGALIS EIENDOM AS",
       "municipality": "OSLO",
       "type": "generic_compound",
-      "verdict": "SAFE_ABSTAIN",
-      "matched_url": null,
-      "evidence": []
+      "verdict": "VERIFIED_EXACT",
+      "matched_url": "https://regaliseiendom.no/",
+      "evidence": [
+        "legal_name_and_municipality_match"
+      ]
     },
     {
       "org": "811653942",

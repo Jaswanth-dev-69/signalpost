@@ -132,6 +132,7 @@ def enrich_company_profile(
         if enable_discovery and not profile.get("evidence", {}).get("website"):
             discovered_web, dom_metrics = discover_website_by_domain_search(profile, timeout=min(timeout, 6.0))
             add_metrics(dom_metrics)
+            profile.setdefault("web_run", {})["discovery"] = {"requests": dom_metrics.get("requests", 0), "candidates": dom_metrics.get("candidates", 0)}
             if discovered_web:
                 profile["evidence"]["website"] = discovered_web
                 profile["evidence"]["website_discovered"] = discovered_web
