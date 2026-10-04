@@ -1,0 +1,769 @@
+"""Typed, evidence-linked web claims (dated news, job postings) from a verified company site.
+
+Only called for websites that already passed the strict entity gate. Every published item
+points at a page or feed that was actually fetched, with the sha256 of those bytes, the fetch
+time and a span quoting the title and the item's own date. Dates are never the retrieval date.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import urllib.robotparser
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
+from typing import Any
+
+from bs4 import BeautifulSoup
+import tldextract
+
+USER_AGENT = "builderr-signalpost-poc/0.1 (+https://builderr.ai)"
+FAMILY_FETCH_CAP = 6
+MAX_NEWS_ITEMS = 10
+MAX_JOB_POSTINGS = 25
+PER_HOST_INTERVAL_S = 0.35
+
+NEWS_SEGMENTS = {
+    "aktuelt", "nyheter", "nyhet", "nyheiter", "news", "blogg", "blog", "presse", "pressemeldinger",
+    "siste-nytt", "artikler", "artikkel", "aktuelt-og-nyheter", "nyhetsarkiv",
+}
+NEWS_PROBE_PATHS = ("/aktuelt", "/nyheter", "/news", "/blogg")
+NEWS_SKIP_SEGMENTS = {"side", "page", "kategori", "category", "tag", "tags", "author", "forfatter", "feed", "arkiv", "archive"}
+JOB_SEGMENTS = {
+    "ledige-stillinger", "stillinger", "stilling", "karriere", "career", "careers", "jobb", "jobs",
+    "jobbe-hos-oss", "jobb-hos-oss", "rekruttering", "bli-med", "work-with-us", "ledig-stilling",
+}
+JOB_ANCHOR = re.compile(r"ledige?\s+stilling|karriere|jobb(e)?\s+(hos|i)\s|bli\s+med\s+på\s+laget|careers?\b|vacanc|job openings", re.I)
+JOB_PROBE_PATHS = ("/ledige-stillinger", "/karriere", "/jobb")
+JOB_PLATFORMS = {
+    "finn.no": re.compile(r"/job/|finnkode=", re.I),
+    "webcruiter.no": re.compile(r"(advert|/job|AdvertId|ad\.aspx)", re.I),
+    "webcruiter.com": re.compile(r"(advert|/job|AdvertId)", re.I),
+    "teamtailor.com": re.compile(r"/jobs/\d+", re.I),
+    "recman.no": re.compile(r"(job_id=|/job/|/stilling)", re.I),
+    "jobylon.com": re.compile(r"/jobs/\d+", re.I),
+    "easycruit.com": re.compile(r"/vacancy/\d+", re.I),
+    "reachmee.com": re.compile(r"(job|vacancy)", re.I),
+}
+APPLY_MARKERS = re.compile(
+    r"søknadsfrist|søk\s+(på\s+)?stillingen|send\s+(inn\s+)?søknad|søknad\s+(med\s+cv\s+)?sendes|"
+    r"tiltredelse|stillingsprosent|apply\s+now|application\s+deadline|vi\s+søker\s+etter|vi\s+søker\s+en",
+    re.I,
+)
+NO_OPENINGS = re.compile(
+    r"[^.!?|]{0,40}(ingen\s+ledige|ikke\s+(noen\s+)?ledige|for\s+(tiden|øyeblikket)\s+ingen|"
+    r"så\s+snart\s+det\s+kommer\s+ledige|no\s+(open\s+)?(positions|vacancies)|no\s+current\s+openings)[^.!?|]{0,100}[.!?]?",
+    re.I,
+)
+NO_MONTHS = {
+    "januar": 1, "februar": 2, "mars": 3, "april": 4, "mai": 5, "juni": 6, "juli": 7, "august": 8,
+    "september": 9, "oktober": 10, "november": 11, "desember": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "sept": 9, "okt": 10, "nov": 11, "des": 12,
+}
+NO_DATE_TEXT = re.compile(
+    r"\b(\d{1,2})\.?\s+(januar|februar|mars|april|mai|juni|juli|august|september|oktober|november|desember|"
+    r"jan|feb|mar|apr|jun|jul|aug|sept?|okt|nov|des)\.?\s+(20\d{2})\b",
+    re.I,
+)
+NUMERIC_DATE_TEXT = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(20\d{2})\b")
+ISO_DATE_TEXT = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
+URL_DATE = re.compile(r"/(20\d{2})[/-](\d{1,2})[/-](\d{1,2})(?:/|-|$)")
+
+_robots_lock = threading.Lock()
+_robots_cache: dict[str, urllib.robotparser.RobotFileParser | None] = {}
+_host_lock = threading.Lock()
+_host_next: dict[str, float] = {}
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def registered_domain(url: str) -> str:
+    return tldextract.extract(urllib.parse.urlparse(url).hostname or "").top_domain_under_public_suffix
+
+
+def _opener():
+    from .website import SAFE_OPENER  # late import: website imports this module
+
+    return SAFE_OPENER
+
+
+def robots_allowed(url: str, timeout: float) -> bool:
+    """robots.txt check, cached per origin. A missing or unreadable robots.txt allows fetching."""
+    parsed = urllib.parse.urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    with _robots_lock:
+        cached = _robots_cache.get(origin, ...)
+    if cached is ...:
+        parser: urllib.robotparser.RobotFileParser | None = urllib.robotparser.RobotFileParser()
+        parser.set_url(origin + "/robots.txt")
+        try:
+            request = urllib.request.Request(origin + "/robots.txt", headers={"User-Agent": USER_AGENT})
+            with _opener().open(request, timeout=min(timeout, 8.0)) as response:
+                parser.parse(response.read(500_000).decode("utf-8", errors="replace").splitlines())
+        except Exception:
+            parser = None
+        with _robots_lock:
+            _robots_cache[origin] = parser
+        cached = parser
+    return True if cached is None else cached.can_fetch(USER_AGENT, url)
+
+
+def _throttle(host: str) -> None:
+    with _host_lock:
+        now = time.monotonic()
+        start = max(now, _host_next.get(host, 0.0))
+        _host_next[host] = start + PER_HOST_INTERVAL_S
+    if start > now:
+        time.sleep(start - now)
+
+
+class SiteFetcher:
+    """Same-registered-domain fetcher with per-family fetch budgets and request metrics."""
+
+    def __init__(self, domain: str, *, timeout: float, max_bytes: int = 1_500_000, deadline: float | None = None):
+        self.domain = domain
+        self.timeout = timeout
+        self.max_bytes = max_bytes
+        self.deadline = deadline
+        self.requests = 0
+        self.bytes = 0
+        self.latencies_ms: list[int] = []
+        self.errors: list[dict[str, str]] = []
+        self.budget: dict[str, int] = {}
+        self.cache: dict[str, dict[str, Any] | None] = {}
+
+    def metrics(self) -> dict[str, Any]:
+        return {"requests": self.requests, "bytes": self.bytes, "latencies_ms": list(self.latencies_ms)}
+
+    def get(self, url: str, family: str, *, accept: str = "text/html,application/xhtml+xml") -> dict[str, Any] | None:
+        url = urllib.parse.urldefrag(url)[0]
+        if url in self.cache:
+            return self.cache[url]
+        if self.budget.get(family, 0) >= FAMILY_FETCH_CAP:
+            return None
+        if self.deadline is not None and time.monotonic() > self.deadline:
+            return None
+        if registered_domain(url) != self.domain:
+            return None
+        self.budget[family] = self.budget.get(family, 0) + 1
+        self.cache[url] = None
+        try:
+            if not robots_allowed(url, self.timeout):
+                self.errors.append({"url": url, "error": "robots.txt disallows page"})
+                return None
+            host = urllib.parse.urlparse(url).netloc.lower()
+            _throttle(host)
+            started = time.monotonic()
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
+            self.requests += 1
+            with _opener().open(request, timeout=self.timeout) as response:
+                raw = response.read(self.max_bytes + 1)
+                retrieved_at = _utc_now()
+                final_url = response.geturl()
+                content_type = response.headers.get("content-type", "").lower()
+            self.latencies_ms.append(int((time.monotonic() - started) * 1000))
+            self.bytes += len(raw)
+            if len(raw) > self.max_bytes or registered_domain(final_url) != self.domain:
+                return None
+            page = {
+                "url": final_url,
+                "requested_url": url,
+                "raw": raw,
+                "content_type": content_type,
+                "content_sha256": hashlib.sha256(raw).hexdigest(),
+                "retrieved_at": retrieved_at,
+            }
+            self.cache[url] = page
+            return page
+        except urllib.error.HTTPError as exc:
+            self.errors.append({"url": url, "error": f"HTTP {exc.code}"})
+        except Exception as exc:  # network, TLS, decode
+            self.errors.append({"url": url, "error": f"{type(exc).__name__}: {str(exc)[:100]}"})
+        return None
+
+
+# ---------------------------------------------------------------- dates
+
+def _valid_date(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if value.year < 2000 or value > now + timedelta(days=2):
+        return None
+    return value.date().isoformat()
+
+
+def parse_iso(text: str | None) -> str | None:
+    text = str(text or "").strip()
+    match = re.match(r"(20\d{2})-(\d{2})-(\d{2})", text)
+    if not match:
+        return None
+    try:
+        return _valid_date(datetime(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+    except ValueError:
+        return None
+
+
+def parse_rfc822(text: str | None) -> str | None:
+    try:
+        return _valid_date(parsedate_to_datetime(str(text or "").strip()))
+    except (TypeError, ValueError, IndexError):
+        return parse_iso(text)
+
+
+def parse_norwegian_text_date(text: str) -> tuple[str, str] | None:
+    """Return (iso_date, quoted_text) for the first Norwegian or numeric date in text."""
+    match = NO_DATE_TEXT.search(text)
+    if match:
+        quoted = match.group(0)
+        try:
+            import dateparser
+
+            parsed = dateparser.parse(quoted, languages=["nb"], settings={"STRICT_PARSING": True, "REQUIRE_PARTS": ["day", "month", "year"]})
+        except Exception:
+            parsed = None
+        if parsed is None:
+            try:
+                parsed = datetime(int(match.group(3)), NO_MONTHS[match.group(2).lower().rstrip(".")], int(match.group(1)))
+            except (KeyError, ValueError):
+                parsed = None
+        iso = _valid_date(parsed)
+        if iso:
+            return iso, quoted
+    for pattern, order in ((NUMERIC_DATE_TEXT, (3, 2, 1)), (ISO_DATE_TEXT, (1, 2, 3))):
+        match = pattern.search(text)
+        if match:
+            try:
+                iso = _valid_date(datetime(int(match.group(order[0])), int(match.group(order[1])), int(match.group(order[2]))))
+            except ValueError:
+                iso = None
+            if iso:
+                return iso, match.group(0)
+    return None
+
+
+def url_date(url: str) -> tuple[str, str] | None:
+    match = URL_DATE.search(urllib.parse.urlparse(url).path)
+    if not match:
+        return None
+    try:
+        iso = _valid_date(datetime(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+    except ValueError:
+        return None
+    return (iso, match.group(0).strip("/-")) if iso else None
+
+
+def _jsonld_nodes(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            nodes.append(value)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            walk(json.loads(script.string or script.get_text() or ""))
+        except (ValueError, TypeError):
+            continue
+    return nodes
+
+
+def _types(node: dict[str, Any]) -> set[str]:
+    kind = node.get("@type")
+    return {str(k) for k in (kind if isinstance(kind, list) else [kind]) if k}
+
+
+def article_date(soup: BeautifulSoup, url: str) -> tuple[str, str, str] | None:
+    """(iso_date, quoted_source_text, method) for an individual article page."""
+    meta = soup.select_one('meta[property="article:published_time"], meta[itemprop="datePublished"], meta[name="date"], meta[name="publish-date"]')
+    if meta and parse_iso(meta.get("content")):
+        return parse_iso(meta.get("content")), str(meta.get("content")), "meta_published_time"
+    nodes = _jsonld_nodes(soup)
+    article_types = {"Article", "NewsArticle", "BlogPosting", "Report", "PressRelease", "WebPage"}
+    for node in sorted(nodes, key=lambda n: 0 if _types(n) & {"Article", "NewsArticle", "BlogPosting"} else 1):
+        if _types(node) & article_types and parse_iso(node.get("datePublished")):
+            return parse_iso(node.get("datePublished")), str(node.get("datePublished")), "jsonld_datePublished"
+    scope = soup.select_one("article") or soup.select_one("main") or soup
+    for node in scope.select("time[datetime]"):
+        if parse_iso(node.get("datetime")):
+            return parse_iso(node.get("datetime")), str(node.get("datetime")), "time_datetime"
+    head = " ".join((scope.get_text(" ", strip=True) or "").split())[:1500]
+    found = parse_norwegian_text_date(head)
+    if found:
+        return found[0], found[1], "page_text_date"
+    found = url_date(url)
+    if found:
+        return found[0], found[1], "url_date"
+    return None
+
+
+def _title(soup: BeautifulSoup) -> str:
+    for selector in ("article h1", "main h1", "h1", 'meta[property="og:title"]'):
+        node = soup.select_one(selector)
+        if node is not None:
+            text = node.get("content") if node.name == "meta" else node.get_text(" ", strip=True)
+            text = " ".join(str(text or "").split())
+            if len(text) >= 4:
+                return text[:300]
+    return " ".join((soup.title.get_text(" ", strip=True) if soup.title else "").split())[:300]
+
+
+def _soup(page: dict[str, Any]) -> BeautifulSoup:
+    return BeautifulSoup(page["raw"].decode("utf-8", errors="replace"), "lxml")
+
+
+def _is_html(page: dict[str, Any] | None) -> bool:
+    return bool(page) and "html" in page.get("content_type", "")
+
+
+def _segments(url: str) -> list[str]:
+    return [s for s in urllib.parse.urlparse(url).path.casefold().split("/") if s]
+
+
+def _same_site_links(base_url: str, soup: BeautifulSoup, domain: str) -> list[tuple[str, str]]:
+    links: dict[str, str] = {}
+    for anchor in soup.select("a[href]"):
+        href = str(anchor.get("href") or "").strip()
+        if not href or href.startswith(("mailto:", "tel:", "javascript:")):
+            continue
+        url = urllib.parse.urldefrag(urllib.parse.urljoin(base_url, href))[0]
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in {"http", "https"} or registered_domain(url) != domain:
+            continue
+        links.setdefault(url, " ".join(anchor.get_text(" ", strip=True).split())[:200])
+    return list(links.items())
+
+
+def _feed_links(base_url: str, soup: BeautifulSoup) -> list[str]:
+    feeds = []
+    for node in soup.select('link[rel~="alternate"][href]'):
+        kind = str(node.get("type") or "").lower()
+        href = urllib.parse.urljoin(base_url, str(node.get("href")))
+        if ("rss" in kind or "atom" in kind) and "comment" not in href.lower() and "kommentar" not in href.lower():
+            feeds.append(href)
+    return list(dict.fromkeys(feeds))
+
+
+# ---------------------------------------------------------------- news
+
+NEWS_TOKENS = {"aktuelt", "nyheter", "nyhet", "nyheiter", "news", "blogg", "blog", "presse", "pressemeldinger", "artikler", "nytt"}
+
+
+def _news_index(segments: list[str]) -> int | None:
+    for index, segment in enumerate(segments):
+        if segment in NEWS_SEGMENTS or (set(re.split(r"[-_]", segment)) & NEWS_TOKENS and "nyhetsbrev" not in segment):
+            return index
+    return None
+
+
+def is_news_listing(url: str) -> bool:
+    segments = _segments(url)
+    index = _news_index(segments)
+    return index is not None and index == len(segments) - 1
+
+
+def is_news_article(url: str) -> bool:
+    segments = _segments(url)
+    index = _news_index(segments)
+    if index is None or index == len(segments) - 1:
+        return False
+    rest = segments[index + 1:]
+    if rest[0] in NEWS_SKIP_SEGMENTS or (rest[0].isdigit() and len(rest) == 1 and len(rest[0]) < 4):
+        return False
+    return bool(re.search(r"[a-z]", rest[-1])) or url_date(url) is not None
+
+
+def parse_feed(page: dict[str, Any], domain: str) -> list[dict[str, Any]]:
+    try:
+        root = ET.fromstring(page["raw"])
+    except ET.ParseError:
+        return []
+    items: list[dict[str, Any]] = []
+    atom = "{http://www.w3.org/2005/Atom}"
+    entries = root.findall(".//item") or root.findall(f".//{atom}entry")
+    for entry in entries:
+        if entry.tag == "item":
+            title = (entry.findtext("title") or "").strip()
+            link = (entry.findtext("link") or "").strip()
+            raw_date = (entry.findtext("pubDate") or entry.findtext("{http://purl.org/dc/elements/1.1/}date") or "").strip()
+            iso, method = parse_rfc822(raw_date), "rss_pubDate"
+        else:
+            title = (entry.findtext(f"{atom}title") or "").strip()
+            link_node = entry.find(f"{atom}link[@rel='alternate']") or entry.find(f"{atom}link")
+            link = (link_node.get("href") if link_node is not None else "") or ""
+            raw_date = (entry.findtext(f"{atom}published") or entry.findtext(f"{atom}updated") or "").strip()
+            iso, method = parse_iso(raw_date), "atom_published" if entry.findtext(f"{atom}published") else "atom_updated"
+        link = urllib.parse.urljoin(page["url"], link)
+        if not (title and link and iso) or registered_domain(link) != domain:
+            continue
+        items.append({
+            "title": " ".join(title.split())[:300],
+            "url": link,
+            "published_date": iso,
+            "date_source": method,
+            "source_page": page["url"],
+            "content_sha256": page["content_sha256"],
+            "retrieved_at": page["retrieved_at"],
+            "claim_span": f"{' '.join(title.split())[:200]} | {raw_date}",
+        })
+    return items
+
+
+def _listing_inline_items(listing: dict[str, Any], soup: BeautifulSoup, domain: str) -> list[dict[str, Any]]:
+    """Dated teasers on a listing page: an article link whose small container shows a date."""
+    items: dict[str, dict[str, Any]] = {}
+    for anchor in soup.select("a[href]"):
+        url = urllib.parse.urldefrag(urllib.parse.urljoin(listing["url"], str(anchor.get("href"))))[0]
+        if registered_domain(url) != domain or not is_news_article(url) or url in items:
+            continue
+        container = anchor
+        for _ in range(4):
+            parent = container.parent
+            if parent is None or len(parent.get_text(" ", strip=True)) > 700 or len(parent.select("a[href]")) > 6:
+                break
+            container = parent
+        found = None
+        time_node = container.select_one("time[datetime]")
+        if time_node is not None and parse_iso(time_node.get("datetime")):
+            found = (parse_iso(time_node.get("datetime")), str(time_node.get("datetime")), "listing_time_datetime")
+        else:
+            text_date = parse_norwegian_text_date(" ".join(container.get_text(" ", strip=True).split()))
+            if text_date:
+                found = (text_date[0], text_date[1], "listing_text_date")
+        if not found:
+            continue
+        heading = container.select_one("h1, h2, h3, h4")
+        title = " ".join((heading.get_text(" ", strip=True) if heading else anchor.get_text(" ", strip=True)).split())[:300]
+        if len(title) < 4:
+            continue
+        items[url] = {
+            "title": title,
+            "url": url,
+            "published_date": found[0],
+            "date_source": found[2],
+            "source_page": listing["url"],
+            "content_sha256": listing["content_sha256"],
+            "retrieved_at": listing["retrieved_at"],
+            "claim_span": f"{title[:200]} | {found[1]}",
+        }
+    return list(items.values())
+
+
+def _sitemap_article_urls(fetcher: SiteFetcher, home_url: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """News sitemaps give real publication dates; plain sitemaps only give article URLs."""
+    origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlparse(home_url))
+    page = fetcher.get(origin + "/sitemap.xml", "news", accept="application/xml,text/xml")
+    if not page:
+        return [], []
+    try:
+        root = ET.fromstring(page["raw"])
+    except ET.ParseError:
+        return [], []
+    ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9", "n": "http://www.google.com/schemas/sitemap-news/0.9"}
+    children = [loc.text.strip() for loc in root.findall("s:sitemap/s:loc", ns) if loc.text]
+    if children:
+        preferred = [c for c in children if re.search(r"post|news|nyhet|aktuelt|artik|blog", c, re.I)]
+        if not preferred:
+            return [], []
+        page = fetcher.get(preferred[0], "news", accept="application/xml,text/xml")
+        if not page:
+            return [], []
+        try:
+            root = ET.fromstring(page["raw"])
+        except ET.ParseError:
+            return [], []
+    dated: list[dict[str, Any]] = []
+    urls: list[str] = []
+    for node in root.findall("s:url", ns):
+        loc = (node.findtext("s:loc", default="", namespaces=ns) or "").strip()
+        pub = node.findtext("n:news/n:publication_date", default="", namespaces=ns)
+        title = node.findtext("n:news/n:title", default="", namespaces=ns)
+        if loc and pub and title and parse_iso(pub):
+            dated.append({
+                "title": " ".join(title.split())[:300], "url": loc, "published_date": parse_iso(pub),
+                "date_source": "news_sitemap_publication_date", "source_page": page["url"],
+                "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
+                "claim_span": f"{' '.join(title.split())[:200]} | {pub.strip()}",
+            })
+        elif loc and is_news_article(loc):
+            urls.append(loc)
+    return dated, urls
+
+
+def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: BeautifulSoup, extra_links: list[tuple[str, str]]) -> dict[str, Any]:
+    domain = fetcher.domain
+    links = _same_site_links(home["url"], home_soup, domain) + extra_links
+    feeds = _feed_links(home["url"], home_soup)
+    listings = [url for url, _ in links if is_news_listing(url)]
+    articles = [url for url, _ in links if is_news_article(url)]
+    checked: list[dict[str, Any]] = []
+    items: dict[str, dict[str, Any]] = {}
+
+    listing_page = None
+    for url in listings[:2]:
+        listing_page = fetcher.get(url, "news")
+        if _is_html(listing_page):
+            break
+        listing_page = None
+    if listing_page is None and not articles and not feeds:
+        for path in NEWS_PROBE_PATHS[:2]:
+            probe = fetcher.get(urllib.parse.urljoin(home["url"], path), "news")
+            if _is_html(probe) and _news_index(_segments(probe["url"])) is not None:
+                listing_page = probe
+                break
+    if listing_page is not None:
+        soup = _soup(listing_page)
+        feeds.extend(f for f in _feed_links(listing_page["url"], soup) if f not in feeds)
+        listing_links = _same_site_links(listing_page["url"], soup, domain)
+        listing_articles = [u for u, _ in listing_links if is_news_article(u)]
+        if not listing_articles:
+            # Landing page that only links onward to the real archive (one hop).
+            onward = [u for u, _ in listing_links if is_news_listing(u) and u.rstrip("/") != listing_page["url"].rstrip("/") and u not in listings]
+            for url in onward[:1]:
+                archive = fetcher.get(url, "news")
+                if _is_html(archive):
+                    listing_page, soup = archive, _soup(archive)
+                    listing_links = _same_site_links(archive["url"], soup, domain)
+                    listing_articles = [u for u, _ in listing_links if is_news_article(u)]
+        articles = list(dict.fromkeys(listing_articles + articles))
+        for item in _listing_inline_items(listing_page, soup, domain):
+            items.setdefault(item["url"], item)
+        text = " ".join(soup.get_text(" ", strip=True).split())
+        checked.append({**_page_ref(listing_page), "claim_span": (_title(soup) or "news page") + " | " + text[:160]})
+
+    if len(items) < MAX_NEWS_ITEMS:
+        wordpress = b"wp-content" in home["raw"] or b"wp-json" in home["raw"]
+        if not feeds and wordpress:
+            feeds.append(urllib.parse.urljoin(home["url"], "/feed/"))
+        for feed_url in feeds[:2]:
+            feed = fetcher.get(feed_url, "news", accept="application/rss+xml,application/atom+xml,application/xml,text/xml")
+            if not feed or _is_html(feed):
+                continue
+            feed_items = parse_feed(feed, domain)
+            for item in feed_items:
+                items.setdefault(item["url"], item)
+            if feed_items:
+                break
+
+    if not items and not articles:
+        dated, sitemap_urls = _sitemap_article_urls(fetcher, home["url"])
+        for item in dated:
+            items.setdefault(item["url"], item)
+        articles = sitemap_urls[:20]
+
+    for url in articles:
+        if len(items) >= MAX_NEWS_ITEMS:
+            break
+        if url in items:
+            continue
+        page = fetcher.get(url, "news")
+        if page is None:
+            if fetcher.budget.get("news", 0) >= FAMILY_FETCH_CAP:
+                break
+            continue
+        if not _is_html(page):
+            continue
+        soup = _soup(page)
+        found = article_date(soup, page["url"])
+        title = _title(soup)
+        if not found or not title:
+            continue
+        items[url] = {
+            "title": title,
+            "url": page["url"],
+            "published_date": found[0],
+            "date_source": found[2],
+            "source_page": page["url"],
+            "content_sha256": page["content_sha256"],
+            "retrieved_at": page["retrieved_at"],
+            "claim_span": f"{title[:200]} | {found[1]}",
+        }
+
+    ordered = sorted(items.values(), key=lambda item: item["published_date"], reverse=True)[:MAX_NEWS_ITEMS]
+    return {"items": ordered, "checked_pages": checked}
+
+
+# ---------------------------------------------------------------- jobs
+
+def _page_ref(page: dict[str, Any]) -> dict[str, Any]:
+    return {"url": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"]}
+
+
+def _platform_posting(url: str) -> str | None:
+    host = (urllib.parse.urlparse(url).hostname or "").casefold()
+    for domain, pattern in JOB_PLATFORMS.items():
+        if (host == domain or host.endswith("." + domain)) and pattern.search(url):
+            return domain
+    return None
+
+
+def _is_careers_url(url: str, anchor_text: str = "") -> bool:
+    segments = _segments(url)
+    return any(s in JOB_SEGMENTS for s in segments) or bool(anchor_text and JOB_ANCHOR.search(anchor_text))
+
+
+def _jobposting_items(page: dict[str, Any], soup: BeautifulSoup) -> list[dict[str, Any]]:
+    postings = []
+    for node in _jsonld_nodes(soup):
+        if "JobPosting" not in _types(node):
+            continue
+        title = " ".join(str(node.get("title") or node.get("name") or "").split())[:300]
+        if not title:
+            continue
+        posted = parse_iso(node.get("datePosted"))
+        postings.append({
+            "title": title,
+            "url": urllib.parse.urljoin(page["url"], str(node.get("url") or page["url"])),
+            "posted_date": posted,
+            "valid_through": parse_iso(node.get("validThrough")),
+            "platform": "company_site",
+            "source_page": page["url"],
+            "content_sha256": page["content_sha256"],
+            "retrieved_at": page["retrieved_at"],
+            "claim_span": f"JobPosting title: {title}" + (f" | datePosted: {node.get('datePosted')}" if posted else ""),
+        })
+    return postings
+
+
+def _platform_links(page: dict[str, Any], soup: BeautifulSoup) -> list[dict[str, Any]]:
+    postings = []
+    for anchor in soup.select("a[href]"):
+        href = str(anchor.get("href") or "").strip()
+        url = urllib.parse.urljoin(page["url"], href)
+        platform = _platform_posting(url)
+        if not platform:
+            continue
+        text = " ".join(anchor.get_text(" ", strip=True).split())[:300]
+        if len(text) < 4 or re.search(r"\b(les mer|søk her|søk på|klikk her|apply|se stilling(en)?|mer info|finn\.no|webcruiter|ledige stillinger)\b", text, re.I):
+            heading = anchor.find_previous(["h2", "h3", "h4"])
+            text = " ".join(heading.get_text(" ", strip=True).split())[:300] if heading else ""
+        if len(text) < 4 or re.search(r"\b(les mer|søk her|klikk her|ledige stillinger)\b", text, re.I):
+            continue
+        postings.append({
+            "title": text,
+            "url": url,
+            "platform": platform,
+            "source_page": page["url"],
+            "content_sha256": page["content_sha256"],
+            "retrieved_at": page["retrieved_at"],
+            "claim_span": f"{text[:200]} | {href[:250]}",
+        })
+    return postings
+
+
+def discover_jobs(fetcher: SiteFetcher, home: dict[str, Any], home_soup: BeautifulSoup, extra_pages: list[dict[str, Any]]) -> dict[str, Any]:
+    domain = fetcher.domain
+    postings: dict[str, dict[str, Any]] = {}
+    sources = [home, *extra_pages]
+    candidates: list[str] = []
+    for page in sources:
+        if not _is_html(page):
+            continue
+        soup = home_soup if page is home else _soup(page)
+        for item in _jobposting_items(page, soup) + _platform_links(page, soup):
+            postings.setdefault(item["url"], item)
+        for url, text in _same_site_links(page["url"], soup, domain):
+            if _is_careers_url(url, text) and url.rstrip("/") != home["url"].rstrip("/"):
+                candidates.append(url)
+    candidates = list(dict.fromkeys(candidates))
+    # Shallowest careers URL first: the index page, not an individual posting.
+    candidates.sort(key=lambda u: (len(_segments(u)), u))
+
+    careers_page = None
+    for url in candidates[:2]:
+        page = fetcher.get(url, "jobs")
+        if _is_html(page):
+            careers_page = page
+            break
+    if careers_page is None and not candidates:
+        for path in JOB_PROBE_PATHS[:2]:
+            probe = fetcher.get(urllib.parse.urljoin(home["url"], path), "jobs")
+            if _is_html(probe) and _is_careers_url(probe["url"]) and re.search(r"stilling|karriere|jobb|career|job", (_title(_soup(probe)) or ""), re.I):
+                careers_page = probe
+                break
+
+    careers_ref = None
+    if careers_page is not None:
+        soup = _soup(careers_page)
+        for item in _jobposting_items(careers_page, soup) + _platform_links(careers_page, soup):
+            postings.setdefault(item["url"], item)
+        careers_segments = _segments(careers_page["url"])
+        deeper = [
+            (url, text) for url, text in _same_site_links(careers_page["url"], soup, domain)
+            if _segments(url)[:len(careers_segments)] == careers_segments and len(_segments(url)) > len(careers_segments)
+            and _segments(url)[-1] not in NEWS_SKIP_SEGMENTS
+        ]
+        for url, _text in deeper[:8]:
+            if len(postings) >= MAX_JOB_POSTINGS or fetcher.budget.get("jobs", 0) >= FAMILY_FETCH_CAP:
+                break
+            page = fetcher.get(url, "jobs")
+            if not _is_html(page):
+                continue
+            page_soup = _soup(page)
+            structured = _jobposting_items(page, page_soup)
+            if structured:
+                for item in structured:
+                    postings.setdefault(item["url"], item)
+                continue
+            text = " ".join(page_soup.get_text(" ", strip=True).split())
+            marker = APPLY_MARKERS.search(text)
+            title = _title(page_soup)
+            if marker and title:
+                postings.setdefault(page["url"], {
+                    "title": title,
+                    "url": page["url"],
+                    "platform": "company_site",
+                    "source_page": page["url"],
+                    "content_sha256": page["content_sha256"],
+                    "retrieved_at": page["retrieved_at"],
+                    "claim_span": f"{title[:200]} | {text[max(0, marker.start() - 60):marker.end() + 60]}",
+                })
+        text = " ".join(soup.get_text(" ", strip=True).split())
+        no_openings = NO_OPENINGS.search(text)
+        span = no_openings.group(0).strip() if no_openings else (_title(soup) + " | " + text[:200])
+        careers_ref = {**_page_ref(careers_page), "claim_span": span, "explicit_no_openings": bool(no_openings)}
+
+    return {"postings": list(postings.values())[:MAX_JOB_POSTINGS], "careers_page": careers_ref}
+
+
+# ---------------------------------------------------------------- entry point
+
+def crawl_web_claims(website_value: dict[str, Any], *, timeout: float = 10.0, deadline: float | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Crawl a verified site for dated news and job postings within per-family fetch budgets."""
+    home_url = website_value.get("final_url")
+    domain = website_value.get("registered_domain") or registered_domain(home_url or "")
+    fetcher = SiteFetcher(domain, timeout=timeout, deadline=deadline)
+    empty = {"news": {"items": [], "checked_pages": []}, "jobs": {"postings": [], "careers_page": None}}
+    if not home_url:
+        return empty, fetcher.metrics()
+    # Re-use the homepage bytes already fetched by fetch_website (same hash/time).
+    home = website_value.get("_homepage")
+    if not home:
+        home = fetcher.get(home_url, "home")
+    if not _is_html(home):
+        return empty, fetcher.metrics()
+    home_soup = _soup(home)
+    extra_pages = [p for p in website_value.get("_subpages") or [] if p]
+    extra_links: list[tuple[str, str]] = []
+    for page in extra_pages:
+        if _is_html(page):
+            extra_links.extend(_same_site_links(page["url"], _soup(page), domain))
+    news = discover_news(fetcher, home, home_soup, extra_links)
+    jobs = discover_jobs(fetcher, home, home_soup, extra_pages)
+    claims = {"news": news, "jobs": jobs, "crawl_errors": fetcher.errors[:20]}
+    return claims, fetcher.metrics()

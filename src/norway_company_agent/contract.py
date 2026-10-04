@@ -113,7 +113,7 @@ def profile_to_contract_envelope(
     run_id: str,
     started_at: str,
     completed_at: str,
-    terminal_status: str = "completed",
+    terminal_status: str = "completed",  # OUTPUT_CONTRACT.md terminal value
     third_party_cost_usd: float = 0.0,
 ) -> dict[str, Any]:
     """Transform an enriched company profile into the official Signalpost output contract.
@@ -173,19 +173,21 @@ def profile_to_contract_envelope(
             key_hint,
         )
 
-    def add_claim(field: str, value: Any, availability: str, confidence: float, ev_ids: list[str | None]) -> None:
+    def add_claim(field: str, value: Any, availability: str, confidence: float, ev_ids: list[str | None]) -> dict[str, Any]:
         ids = list(dict.fromkeys(e for e in ev_ids if e))
         if availability == "available" and not ids:
             # A value without fetched, hashed content behind it is not publishable.
             availability, value, confidence = "failed", None, 0.0
             errors.append({"field": field, "type": "EvidenceMissing", "error": "no fetched content hash for claim"})
-        claims.append({
+        claim = {
             "field": field,
             "value": value if availability == "available" else None,
             "availability": availability,
             "confidence": round(confidence, 3),
             "evidence_ids": ids,
-        })
+        }
+        claims.append(claim)
+        return claim
 
     def fetch_state(record: dict[str, Any] | None) -> str:
         status = (record or {}).get("status")
@@ -347,7 +349,21 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
     # The registry 'hjemmeside' value (or its absence) is the evidence for non-available web states.
     hjemmeside_ev = registry_evidence("homepage", profile.get("website") or None) if registry_evidence else None
 
+    method = (web_val.get("identity_assessment") or {}).get("method")
+    declared = method == "registry_declared_domain"
+    if declared and not hjemmeside_ev:
+        publishable = False  # the registry declaration itself must be evidenced
     if web_status == "available" and publishable:
+        # Registry-declared domains (no on-page entity proof) carry lower confidence.
+        scale = 0.8 if declared else 1.0
+        verification = "registry_declared_domain" if declared else "on_page_entity_match"
+        base_add_claim = add_claim
+
+        def add_claim(field, value, availability, confidence, ev_ids):  # noqa: F811
+            claim = base_add_claim(field, value, availability, round(confidence * scale, 3), ev_ids)
+            claim["verification_method"] = verification
+            return claim
+
         web_url = web_val.get("final_url") or web_rec.get("source_url")
         pages = {p.get("url"): p for p in web_val.get("pages") or [] if p.get("url")}
         home_hash = web_val.get("content_sha256") or web_rec.get("content_sha256")
@@ -363,7 +379,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         # The identity proof may sit on a subpage (e.g. /kontakt with the org number).
         proof_page = web_val.get("identity_proof_page") or {}
         proof_ev = add_evidence(proof_page.get("url"), "company_owned", proof_page.get("retrieved_at"), proof_page.get("content_sha256"), proof_page.get("claim_span"), "website_identity") if proof_page else None
-        add_claim("official_website", web_url, "available", 0.98, [web_ev, proof_ev])
+        add_claim("official_website", web_url, "available", 0.98, [hjemmeside_ev, web_ev] if declared else [web_ev, proof_ev])
 
         desc = str(web_val.get("description") or "").strip()
         if desc:

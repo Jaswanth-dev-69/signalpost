@@ -25,6 +25,9 @@ def validate_envelope(env: dict[str, Any], index: int) -> list[str]:
         for k in ("run_id", "started_at", "completed_at", "terminal_status"):
             if not run.get(k):
                 errors.append(f"Row {index} ({org}): run missing required key {k!r}")
+        if run.get("terminal_status") and run.get("terminal_status") != "completed":
+            # OUTPUT_CONTRACT.md: every input company gets one terminal envelope, "completed".
+            errors.append(f"Row {index} ({org}): terminal_status {run.get('terminal_status')!r} must be 'completed'")
 
     claims = env.get("claims")
     if not isinstance(claims, list):

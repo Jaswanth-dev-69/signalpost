@@ -99,28 +99,22 @@ def _registered_domain(url: str) -> str:
 
 def _robots_allowed(url: str, timeout: float) -> bool:
     assert_public_url(url)
-    parsed = urllib.parse.urlparse(url)
-    robots_url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/robots.txt", "", "", ""))
-    parser = urllib.robotparser.RobotFileParser()
-    parser.set_url(robots_url)
-    try:
-        request = urllib.request.Request(robots_url, headers={"User-Agent": USER_AGENT})
-        with SAFE_OPENER.open(request, timeout=timeout) as response:
-            parser.parse(response.read().decode("utf-8", errors="replace").splitlines())
-        return parser.can_fetch(USER_AGENT, url)
-    except Exception:
-        # An unavailable robots file is not permission to ignore explicit site terms; callers retain
-        # the URL and can route uncertain domains to review. For this bounded homepage POC, allow one
-        # ordinary GET when robots.txt is absent rather than crawl deeper.
-        return True
+    from .webclaims import robots_allowed
+
+    return robots_allowed(url, timeout)
 
 
-def _social_links(base_url: str, soup: BeautifulSoup) -> list[dict[str, str]]:
+CREDIT_CONTEXT = re.compile(r"levert av|utviklet av|laget av|design(et)? av|nettside(r)? (av|fra)|webdesign|powered by|made by|built by|byr[aå]", re.I)
+
+
+def _social_links_raw(base_url: str, soup: BeautifulSoup) -> list[dict[str, str]]:
+    """Social profile links with the raw href as it appears on the page."""
     found: dict[tuple[str, str], dict[str, str]] = {}
-    candidates = [str(node.get("href") or "") for node in soup.select("a[href]")]
-    candidates.extend(str(node.get("data-href") or "") for node in soup.select("[data-href]"))
-    candidates.extend(str(node.get("src") or "") for node in soup.select("iframe[src]"))
-    for candidate in candidates:
+    nodes = [(node, "href") for node in soup.select("a[href]")]
+    nodes.extend((node, "data-href") for node in soup.select("[data-href]"))
+    nodes.extend((node, "src") for node in soup.select("iframe[src]"))
+    for node, attribute in nodes:
+        candidate = str(node.get(attribute) or "").strip()
         url = urllib.parse.urljoin(base_url, candidate)
         parsed_candidate = urllib.parse.urlparse(url)
         if (parsed_candidate.hostname or "").casefold().removeprefix("www.") == "facebook.com" and parsed_candidate.path.startswith("/plugins/"):
@@ -130,8 +124,16 @@ def _social_links(base_url: str, soup: BeautifulSoup) -> list[dict[str, str]]:
         normalized = normalize_social_url(url)
         if not normalized:
             continue
-        found[(normalized["platform"], normalized["url"])] = normalized
+        # Skip web-agency / supplier credits ("Nettside levert av ...").
+        context = node.parent.get_text(" ", strip=True)[:200] if node.parent is not None else ""
+        if CREDIT_CONTEXT.search(context) or CREDIT_CONTEXT.search(node.get_text(" ", strip=True)):
+            continue
+        found.setdefault((normalized["platform"], normalized["url"]), {**normalized, "href": candidate[:300]})
     return sorted(found.values(), key=lambda item: (item["platform"], item["url"]))
+
+
+def _social_links(base_url: str, soup: BeautifulSoup) -> list[dict[str, str]]:
+    return [{"platform": item["platform"], "url": item["url"]} for item in _social_links_raw(base_url, soup)]
 
 
 def structured_social_links(value: Any) -> list[dict[str, str]]:
@@ -157,63 +159,12 @@ def structured_social_links(value: Any) -> list[dict[str, str]]:
     return sorted(found.values(), key=lambda item: (item["platform"], item["url"]))
 
 
-def extract_web_claims(pages: list[dict[str, Any]], social_links: list[dict[str, str]]) -> dict[str, Any]:
-    """Extract only dated, company-owned web items from already fetched pages."""
-    profiles = [
-        {"platform": item["platform"], "url": item["url"], "found_on_page": item.get("found_on_page")}
-        for item in social_links
-    ]
-    news_items: list[dict[str, Any]] = []
-    job_postings: list[dict[str, Any]] = []
-    careers_page: str | None = None
-    careers_content_sha256: str | None = None
-    retrieved_at = next((p.get("retrieved_at") for p in pages if p.get("retrieved_at")), None)
-    for page in pages:
-        url = str(page.get("url") or "")
-        path = urllib.parse.urlparse(url).path.casefold()
-        text = str(page.get("main_text_excerpt") or "")
-        date_candidates = [str(item) for item in page.get("date_candidates") or []]
-        date_match = DATE_PATTERN.search(text)
-        published_date = date_candidates[0] if date_candidates else (date_match.group(0) if date_match else None)
-        if any(term in path for term in NEWS_TERMS) and published_date:
-            title = str(page.get("title") or "").strip()
-            if title:
-                news_items.append({
-                    "title": title,
-                    "url": url,
-                    "published_date": published_date,
-                    "source_page": url,
-                    "content_sha256": page.get("content_sha256"),
-                })
-        if any(term in path for term in JOB_TERMS):
-            careers_page = careers_page or url
-            careers_content_sha256 = careers_content_sha256 or page.get("content_sha256")
-            # Preserve a dated posting only when the page exposes a clear title/date pair.
-            if published_date:
-                title = str(page.get("title") or "").strip()
-                if title:
-                    job_postings.append({
-                        "title": title,
-                        "url": url,
-                        "posted_date": published_date,
-                        "source_page": url,
-                        "content_sha256": page.get("content_sha256"),
-                    })
-    return {
-        "social": {"profiles": profiles, "status": "available" if profiles else "not_available"},
-        "news": {
-            "items": news_items,
-            "status": "available" if news_items else "not_available",
-            "retrieved_at": retrieved_at,
-        },
-        "jobs": {
-            "postings": job_postings,
-            "careers_page": careers_page,
-            "careers_content_sha256": careers_content_sha256,
-            "retrieved_at": retrieved_at,
-            "status": "available" if job_postings else ("not_available" if careers_page else "not_available"),
-        },
-    }
+def strip_private_fields(record: dict[str, Any] | None) -> None:
+    """Drop in-memory page bytes before a website record is serialized."""
+    value = (record or {}).get("value")
+    if isinstance(value, dict):
+        value.pop("_homepage", None)
+        value.pop("_subpages", None)
 
 
 def normalize_social_url(url: str) -> dict[str, str] | None:
@@ -227,10 +178,18 @@ def normalize_social_url(url: str) -> dict[str, str] | None:
         return None
     parts = [part.strip() for part in parsed.path.split("/") if part.strip()]
     lowered = [part.casefold() for part in parts]
+    if platform == "facebook" and lowered[:1] in (["pg"], ["people"]) and len(parts) > 1:
+        parts, lowered = parts[1:], lowered[1:]
     rejected_first = {
-        "facebook": {"sharer", "sharer.php", "share.php", "dialog", "policy.php", "privacy", "events", "groups", "plugins"},
-        "instagram": {"p", "reel", "reels", "stories", "explore"},
-        "x": {"intent", "share", "home", "search", "i"},
+        "facebook": {
+            "sharer", "sharer.php", "share.php", "share", "dialog", "policy.php", "privacy", "events", "groups",
+            "plugins", "login", "login.php", "watch", "marketplace", "help", "hashtag", "business", "home.php",
+            "l.php", "tr", "facebook", "permalink.php", "photo.php", "story.php", "media", "notes",
+        },
+        "instagram": {"p", "reel", "reels", "stories", "explore", "accounts", "instagram", "tv"},
+        "x": {"intent", "share", "home", "search", "i", "hashtag", "login", "twitter", "x", "settings"},
+        "linkedin": set(),
+        "tiktok": set(),
     }
     if not parts or lowered[0] in rejected_first.get(platform, set()):
         return None
@@ -256,6 +215,10 @@ def normalize_social_url(url: str) -> dict[str, str] | None:
     }[platform]
     if platform == "linkedin":
         parts = parts[:2]
+    elif platform == "facebook":
+        parts = parts[:3] if lowered[0] == "pages" else parts[:1]
+    elif platform in {"instagram", "tiktok"}:
+        parts = parts[:1]
     elif platform == "youtube":
         parts = parts[:1] if parts[0].startswith("@") else parts[:2]
     return {"platform": platform, "url": f"https://{canonical_host}/{'/'.join(parts)}"}
@@ -288,6 +251,35 @@ def _priority_links(base_url: str, soup: BeautifulSoup, limit: int = 4, include_
             clean = urllib.parse.urljoin(base_url, path)
             candidates.setdefault(clean, index)
     return [url for url, _ in sorted(candidates.items(), key=lambda item: (item[1], item[0]))[:limit]]
+
+
+IDENTITY_PAGE_LIMIT = 3
+IDENTITY_TERMS = ("kontakt", "contact", "om-oss", "om_oss", "omoss", "about", "personvern", "privacy", "firma", "selskapet")
+
+
+def _identity_links(base_url: str, soup: BeautifulSoup, limit: int = IDENTITY_PAGE_LIMIT) -> list[str]:
+    base_domain = _registered_domain(base_url)
+    ranked: dict[str, int] = {}
+    for anchor in soup.select("a[href]"):
+        url = urllib.parse.urldefrag(urllib.parse.urljoin(base_url, str(anchor.get("href") or "").strip()))[0]
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in {"http", "https"} or _registered_domain(url) != base_domain:
+            continue
+        haystack = (parsed.path + " " + anchor.get_text(" ", strip=True)).casefold()
+        rank = next((index for index, term in enumerate(IDENTITY_TERMS) if term in haystack), None)
+        if rank is None or url.rstrip("/") == base_url.rstrip("/"):
+            continue
+        ranked[url] = min(rank, ranked.get(url, rank))
+    chosen: list[str] = []
+    seen_ranks: set[int] = set()
+    # Prefer one contact page, one about page, one privacy page over three variants of one.
+    for url, rank in sorted(ranked.items(), key=lambda item: (item[1], len(item[0]))):
+        group = 0 if rank < 2 else 1 if rank < 6 else 2
+        if group in seen_ranks:
+            continue
+        seen_ranks.add(group)
+        chosen.append(url)
+    return chosen[:limit]
 
 
 def _fetch_secondary_page(url: str, *, homepage_domain: str, timeout: float, max_bytes: int) -> tuple[dict[str, Any] | None, list[dict[str, str]], int, int, int, str | None]:
@@ -390,45 +382,65 @@ def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_
             "content_sha256": __import__("hashlib").sha256(raw).hexdigest(),
             "extraction_state": _extraction_state(text, soup),
         }
-        page_dates = [str(node.get("datetime")).strip() for node in soup.select("time[datetime]") if node.get("datetime")]
-        page_dates.extend(re.findall(r'"datePublished"\s*:\s*"([^"]+)"', html, re.IGNORECASE))
         pages = [{
             "url": final_url,
             "title": title[:500],
             "main_text_excerpt": text[:5000],
             "content_sha256": value["content_sha256"],
             "retrieved_at": fetched_at,
-            "date_candidates": page_dates,
         }]
-        social = [{**item, "found_on_page": final_url} for item in value["social_links"]]
+        social = [{**item, "found_on_page": final_url} for item in _social_links_raw(final_url, soup)]
         social.extend(
-            {**item, "found_on_page": final_url}
+            {**item, "href": item["url"], "found_on_page": final_url}
             for item in structured_social_links(structured)
         )
-        crawl_errors = []
         requests = 2
         bytes_received = len(raw)
         page_latencies = [elapsed]
-        homepage_domain = value["registered_domain"]
-        for page_url in _priority_links(final_url, soup, limit=12, include_common_paths=True):
-            page, page_social, page_requests, page_bytes, page_elapsed, page_error = _fetch_secondary_page(
-                page_url,
-                homepage_domain=homepage_domain,
-                timeout=timeout,
-                max_bytes=min(max_bytes, 1_000_000),
-            )
-            requests += page_requests
-            bytes_received += page_bytes
-            if page_elapsed:
-                page_latencies.append(page_elapsed)
-            if page:
-                pages.append(page)
-                social.extend({**item, "found_on_page": page["url"]} for item in page_social)
-            elif page_error:
-                crawl_errors.append({"url": page_url, "error": page_error})
+        # Identity pages (about/contact/privacy) carry org numbers, addresses and footer links.
+        from .webclaims import SiteFetcher
+
+        fetcher = SiteFetcher(value["registered_domain"], timeout=timeout, max_bytes=min(max_bytes, 1_000_000))
+        subpages = []
+        for page_url in _identity_links(final_url, soup, limit=IDENTITY_PAGE_LIMIT):
+            page = fetcher.get(page_url, "identity")
+            if not page or "html" not in page["content_type"]:
+                continue
+            page_html = page["raw"].decode("utf-8", errors="replace")
+            page_soup = BeautifulSoup(page_html, "lxml")
+            page_text = trafilatura.extract(page_html, url=page["url"], include_links=False, include_tables=False, favor_precision=True) or ""
+            footer_text = " ".join(page_soup.get_text(" ", strip=True).split())
+            pages.append({
+                "url": page["url"],
+                "title": (page_soup.title.get_text(" ", strip=True)[:500] if page_soup.title else ""),
+                "main_text_excerpt": page_text[:5000],
+                "identity_text_excerpt": footer_text[-3000:],
+                "content_sha256": page["content_sha256"],
+                "retrieved_at": page["retrieved_at"],
+            })
+            social.extend({**item, "found_on_page": page["url"]} for item in _social_links_raw(page["url"], page_soup))
+            subpages.append(page)
+        # Organisation numbers printed on the site (footer, contact, privacy pages).
+        from .identity import org_numbers_in_text
+
+        site_orgs = org_numbers_in_text(" ".join(soup.get_text(" ", strip=True).split()))
+        for page in subpages:
+            page_text = " ".join(BeautifulSoup(page["raw"].decode("utf-8", errors="replace"), "lxml").get_text(" ", strip=True).split())
+            site_orgs.extend(o for o in org_numbers_in_text(page_text) if o not in site_orgs)
+        value["org_numbers_on_site"] = site_orgs
+        metrics = fetcher.metrics()
+        requests += metrics["requests"]
+        bytes_received += metrics["bytes"]
+        page_latencies.extend(metrics["latencies_ms"])
         value["pages"] = pages
-        value["social_links"] = list({(item["platform"], item["url"]): item for item in social}.values())
-        value["crawl_errors"] = crawl_errors
+        first_seen: dict[tuple[str, str], dict[str, str]] = {}
+        for item in social:
+            first_seen.setdefault((item["platform"], item["url"]), item)
+        value["social_links"] = list(first_seen.values())
+        value["crawl_errors"] = fetcher.errors
+        # In-memory only (bytes): reused by the web-claims crawl, stripped before serialization.
+        value["_homepage"] = {"url": final_url, "requested_url": normalized, "raw": raw, "content_type": content_type.lower(), "content_sha256": value["content_sha256"], "retrieved_at": fetched_at}
+        value["_subpages"] = subpages
         return evidence("website", "available", "registry_linked_company_website", final_url, value=value, note="Company-controlled claim layer; not an official registry fact", content_sha256=value["content_sha256"], retrieved_at=fetched_at), {"requests": requests, "bytes": bytes_received, "latencies_ms": page_latencies}
     except urllib.error.HTTPError as exc:
         elapsed = int((time.monotonic() - started) * 1000)

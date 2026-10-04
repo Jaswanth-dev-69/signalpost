@@ -157,7 +157,7 @@ def apply_website_identity_gate(profile: dict[str, Any], website: dict[str, Any]
     # Links published from the company's own strictly verified website are
     # company-owned claims. An unverified or ambiguous website publishes none.
     value["social_links"] = [
-        {"platform": item["platform"], "url": item["url"], "found_on_page": item.get("found_on_page")}
+        {key: item[key] for key in ("platform", "url", "found_on_page", "href") if item.get(key)}
         for item in original
     ] if assessment["publishable"] else []
     website["value"] = value
@@ -166,3 +166,107 @@ def apply_website_identity_gate(profile: dict[str, Any], website: dict[str, Any]
         "assessment": assessment,
         "quarantined_social_links": len(original) - len(value["social_links"]),
     }
+
+
+# Registry-declared domain verification ---------------------------------------------------
+# A site the legal entity itself declared as "hjemmeside" in Enhetsregisteret is accepted
+# for that exact registered domain only, with lower confidence than on-page proof, and never
+# when the site names a different organisation number.
+
+DECLARED_DOMAIN_REJECT = {
+    "facebook.com", "instagram.com", "linkedin.com", "google.com", "google.no", "goo.gl", "youtube.com",
+    "x.com", "twitter.com", "tiktok.com", "snapchat.com", "pinterest.com", "wix.com", "wixsite.com",
+    "squarespace.com", "wordpress.com", "blogspot.com", "weebly.com", "webnode.com", "webnode.no",
+    "jimdo.com", "jimdofree.com", "site123.me", "godaddysites.com", "business.site", "linktr.ee",
+    "finn.no", "1881.no", "gulesider.no", "proff.no", "purehelp.no", "brreg.no", "altinn.no",
+    "mittanbud.no", "hoopla.no", "bedriftsoversikten.no", "enirodk.no", "yelp.com", "tripadvisor.com",
+    "booking.com", "airbnb.com", "vipps.no", "shopify.com", "myshopify.com", "github.io",
+    # Wrong-company hit in declared_domain_audit (national church site shared by 666 parishes).
+    "kirken.no",
+}
+ORG_NUMBER_IN_CONTEXT = re.compile(
+    r"(?:org(?:anisasjons)?\.?\s*-?\s*(?:nr|nummer|no|number)\.?|foretaksregisteret|business\s+reg(?:istration)?\.?\s*(?:no|number)\.?|\bNO)"
+    r"\s*[:.]?\s*(\d{3}\s?\d{3}\s?\d{3})(?!\d)",
+    re.I,
+)
+
+
+def valid_org_number(value: str) -> bool:
+    digits = re.sub(r"\D", "", value)
+    if len(digits) != 9:
+        return False
+    total = sum(int(d) * w for d, w in zip(digits[:8], (3, 2, 7, 6, 5, 4, 3, 2)))
+    check = 11 - total % 11
+    check = 0 if check == 11 else check
+    return check != 10 and check == int(digits[8])
+
+
+def org_numbers_in_text(text: str) -> list[str]:
+    found = []
+    for match in ORG_NUMBER_IN_CONTEXT.finditer(text or ""):
+        digits = re.sub(r"\D", "", match.group(1))
+        if valid_org_number(digits) and digits not in found:
+            found.append(digits)
+    return found
+
+
+def registry_declared_assessment(profile: dict[str, Any], website: dict[str, Any]) -> dict[str, Any]:
+    """Decide whether a registry-declared homepage that failed on-page identity may still be used."""
+    from .webclaims import registered_domain
+
+    value = website.get("value") or {}
+    strict = value.get("identity_assessment") or {}
+    declared = str(profile.get("website") or "").strip()
+    if declared and not re.match(r"^https?://", declared, re.I):
+        declared = "https://" + declared
+    declared_domain = registered_domain(declared) if declared else ""
+    final_domain = registered_domain(value.get("final_url") or website.get("source_url") or "")
+    other_orgs = [o for o in value.get("org_numbers_on_site") or [] if o != profile.get("organisation_number")]
+    content = len(str(value.get("main_text_excerpt") or "").strip()) + len(str(value.get("title") or "").strip())
+    reasons = []
+    if website.get("status") != "available":
+        reasons.append("registry website did not load")
+    if not declared_domain:
+        reasons.append("no registry hjemmeside")
+    elif final_domain != declared_domain:
+        reasons.append(f"site resolved to {final_domain}, not the declared domain {declared_domain}")
+    declared_path = urllib.parse.urlparse(declared).path.strip("/") if declared else ""
+    if declared_path:
+        reasons.append(f"declared homepage is a section ({declared_path}) of a site, not a domain of its own")
+    if declared_domain in DECLARED_DOMAIN_REJECT or final_domain in DECLARED_DOMAIN_REJECT:
+        reasons.append("declared website is a social, directory or hosting platform domain")
+    if strict.get("score", 0) <= 0.3 and any("parked" in r or "sports-club" in r for r in strict.get("reasons") or []):
+        reasons.append("strict gate flagged parked page or sports-club mismatch")
+    if other_orgs:
+        reasons.append(f"site names a different organisation number: {', '.join(other_orgs[:3])}")
+    if content < 40:
+        reasons.append("page has no substantive content")
+    return {
+        "publishable": not reasons,
+        "status": "registry_declared" if not reasons else strict.get("status", "related_or_uncertain"),
+        "score": 0.75 if not reasons else strict.get("score", 0.0),
+        "method": "registry_declared_domain",
+        "declared_domain": declared_domain,
+        "rejection_reasons": reasons,
+        "strict_assessment": strict,
+    }
+
+
+def apply_registry_declared_gate(profile: dict[str, Any], website: dict[str, Any]) -> bool:
+    value = website.get("value") or {}
+    if (value.get("identity_assessment") or {}).get("publishable"):
+        return False
+    assessment = registry_declared_assessment(profile, website)
+    value["registry_declared_assessment"] = assessment
+    if not assessment["publishable"]:
+        return False
+    value["identity_assessment"] = {
+        **assessment,
+        "reasons": ["entity declared this exact domain as hjemmeside in Enhetsregisteret"],
+    }
+    value["social_links"] = [
+        {key: item[key] for key in ("platform", "url", "found_on_page", "href") if item.get(key)}
+        for item in value.get("discovered_social_links") or []
+    ]
+    website["value"] = value
+    return True

@@ -33,11 +33,12 @@ from norway_company_agent.contract import profile_to_contract_envelope  # noqa: 
 from norway_company_agent.discovery import choose_search_candidate  # noqa: E402
 from norway_company_agent.domain_solver import discover_website_by_domain_search  # noqa: E402
 from norway_company_agent.evidence import utc_now  # noqa: E402
-from norway_company_agent.identity import apply_website_identity_gate  # noqa: E402
+from norway_company_agent.identity import apply_registry_declared_gate, apply_website_identity_gate  # noqa: E402
 from norway_company_agent.http import fetch_json  # noqa: E402
 from norway_company_agent.official import accounting_obligation_assessment, fetch_official_modules, fetch_subunit_record  # noqa: E402
 from norway_company_agent.synthesis import generate_company_synthesis  # noqa: E402
-from norway_company_agent.website import extract_web_claims, fetch_website  # noqa: E402
+from norway_company_agent.website import fetch_website, strip_private_fields  # noqa: E402
+from norway_company_agent.webclaims import crawl_web_claims  # noqa: E402
 from scripts.build_prototype import build as build_viewer_html  # noqa: E402
 
 
@@ -56,6 +57,7 @@ def enrich_company_profile(
     *,
     timeout: float = 12.0,
     enable_discovery: bool = True,
+    web_deadline: float | None = None,
 ) -> dict[str, Any]:
     """Enrich a single company profile with deterministic sources and safety wrapping."""
     org = profile["organisation_number"]
@@ -103,37 +105,44 @@ def enrich_company_profile(
 
     # 2. Website processing & discovery
     website_metrics = {"requests": 0, "bytes": 0, "latencies_ms": []}
+
+    def add_metrics(extra: dict[str, Any]) -> None:
+        website_metrics["requests"] += extra.get("requests", 0)
+        website_metrics["bytes"] += extra.get("bytes", 0)
+        website_metrics["latencies_ms"].extend(extra.get("latencies_ms", []))
+
     if "website" in requested_modules:
         reg_website = profile.get("website")
         gated_website = None
 
         # Tier B1: Try registry-listed website if present
         if reg_website:
-            website_record, website_metrics = fetch_website(reg_website, timeout=timeout)
+            website_record, first_metrics = fetch_website(reg_website, timeout=timeout)
+            add_metrics(first_metrics)
             gated = apply_website_identity_gate(profile, website_record)
             gated_website = gated["website"]
             if (gated_website.get("value") or {}).get("identity_assessment", {}).get("publishable"):
                 profile["evidence"]["website"] = gated_website
-                web_value = gated_website.get("value") or {}
-                profile["web_claims"] = extract_web_claims(
-                    web_value.get("pages") or [],
-                    web_value.get("social_links") or [],
-                )
+            elif apply_registry_declared_gate(profile, gated_website):
+                # Exact domain the entity declared in Enhetsregisteret; lower confidence, never
+                # extended to discovered domains or to sites naming another organisation number.
+                profile["evidence"]["website"] = gated_website
 
         # Tier B2: Domain candidate discovery if missing or unverified
         if enable_discovery and not profile.get("evidence", {}).get("website"):
             discovered_web, dom_metrics = discover_website_by_domain_search(profile, timeout=min(timeout, 6.0))
-            website_metrics["requests"] += dom_metrics.get("requests", 0)
-            website_metrics["bytes"] += dom_metrics.get("bytes", 0)
-            website_metrics["latencies_ms"].extend(dom_metrics.get("latencies_ms", []))
+            add_metrics(dom_metrics)
             if discovered_web:
                 profile["evidence"]["website"] = discovered_web
                 profile["evidence"]["website_discovered"] = discovered_web
-                discovered_value = discovered_web.get("value") or {}
-                profile["web_claims"] = extract_web_claims(
-                    discovered_value.get("pages") or [],
-                    discovered_value.get("social_links") or [],
-                )
+
+        # Tier B3: typed web claims, only from a website that passed the strict entity gate.
+        verified = profile.get("evidence", {}).get("website")
+        if verified and (verified.get("value") or {}).get("identity_assessment", {}).get("publishable"):
+            verified_value = verified["value"]
+            web_claims, claim_metrics = crawl_web_claims(verified_value, timeout=min(timeout, 10.0), deadline=web_deadline)
+            add_metrics(claim_metrics)
+            profile["web_claims"] = {"social": {"profiles": verified_value.get("social_links") or []}, **web_claims}
 
         if "website" not in profile.get("evidence", {}):
             if gated_website:
@@ -147,6 +156,9 @@ def enrich_company_profile(
                     "retrieved_at": utc_now(),
                     "note": "No valid website found or verified",
                 }
+        strip_private_fields(gated_website)
+        for key in ("website", "website_discovered"):
+            strip_private_fields(profile["evidence"].get(key))
 
     total_requests += website_metrics["requests"]
     total_bytes += website_metrics["bytes"]
@@ -355,7 +367,7 @@ def main() -> None:
         "exact_expected_count": len(envelopes) == expected_count,
         "unique_organisation_numbers": len(set(e["organisation_number"] for e in envelopes)) == len(envelopes),
         "zero_silent_drops": len(envelopes) == expected_count,
-        "all_terminal_status_completed": all(e.get("run", {}).get("terminal_status") in {"complete", "completed", "partial", "failed"} for e in envelopes),
+        "all_terminal_status_completed": all(e.get("run", {}).get("terminal_status") == "completed" for e in envelopes),
         "input_order_strictly_preserved": [e["organisation_number"] for e in envelopes] == orgs,
     }
 
