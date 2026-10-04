@@ -113,6 +113,8 @@ def _social_links_raw(base_url: str, soup: BeautifulSoup) -> list[dict[str, str]
     nodes = [(node, "href") for node in soup.select("a[href]")]
     nodes.extend((node, "data-href") for node in soup.select("[data-href]"))
     nodes.extend((node, "src") for node in soup.select("iframe[src]"))
+    nodes.extend((node, "href") for node in soup.select('link[rel~="me"][href]'))
+    nodes.extend((node, "content") for node in soup.select('meta[property="og:see_also"][content]'))
     for node, attribute in nodes:
         candidate = str(node.get(attribute) or "").strip()
         url = urllib.parse.urljoin(base_url, candidate)
@@ -253,8 +255,14 @@ def _priority_links(base_url: str, soup: BeautifulSoup, limit: int = 4, include_
     return [url for url, _ in sorted(candidates.items(), key=lambda item: (item[1], item[0]))[:limit]]
 
 
-IDENTITY_PAGE_LIMIT = 3
-IDENTITY_TERMS = ("kontakt", "contact", "om-oss", "om_oss", "omoss", "about", "personvern", "privacy", "firma", "selskapet")
+IDENTITY_PAGE_LIMIT = 4
+IDENTITY_TERMS = (
+    "kontakt", "contact",
+    "om-oss", "om_oss", "omoss", "about",
+    "personvern", "privacy", "firma", "selskapet",
+    "vilkar", "vilkår", "betingelser", "terms", "impressum", "imprint",
+)
+IDENTITY_GROUPS = (2, 6, 10, len(IDENTITY_TERMS))  # contact | about | privacy/company | terms/impressum
 
 
 def _identity_links(base_url: str, soup: BeautifulSoup, limit: int = IDENTITY_PAGE_LIMIT) -> list[str]:
@@ -274,7 +282,7 @@ def _identity_links(base_url: str, soup: BeautifulSoup, limit: int = IDENTITY_PA
     seen_ranks: set[int] = set()
     # Prefer one contact page, one about page, one privacy page over three variants of one.
     for url, rank in sorted(ranked.items(), key=lambda item: (item[1], len(item[0]))):
-        group = 0 if rank < 2 else 1 if rank < 6 else 2
+        group = next(index for index, bound in enumerate(IDENTITY_GROUPS) if rank < bound)
         if group in seen_ranks:
             continue
         seen_ranks.add(group)

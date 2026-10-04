@@ -16,6 +16,7 @@ Main entry point for Signalpost evaluation runs.
 from __future__ import annotations
 
 import argparse
+import re
 import copy
 import json
 import os
@@ -63,6 +64,23 @@ def enrich_company_profile(
     """Both passes for one company (kept for single-company callers)."""
     enrich_official(profile, requested_modules)
     return enrich_web(profile, requested_modules, timeout=timeout, enable_discovery=enable_discovery, web_deadline=web_deadline)
+
+
+def registry_website_alternates(declared: str, record: dict[str, Any]) -> list[str]:
+    """Retry variants for a registry homepage that failed to load (DNS, TLS, timeout, 5xx)."""
+    note = str(record.get("note") or "")
+    if record.get("status") == "available" or "robots.txt" in note or "byte limit" in note:
+        return []
+    if record.get("status") not in {"blocked", "source_error", "not_found"}:
+        return []
+    value = re.sub(r"^https?://", "", str(declared or "").strip(), flags=re.I).strip("/")
+    if not value:
+        return []
+    host, _, path = value.partition("/")
+    other_host = host[4:] if host.lower().startswith("www.") else "www." + host
+    suffix = "/" + path if path else "/"
+    variants = [f"https://{other_host}{suffix}", f"http://{host}{suffix}", f"http://{other_host}{suffix}"]
+    return [v for v in variants if v.rstrip("/") != str(declared).rstrip("/")]
 
 
 def enrich_official(profile: dict[str, Any], requested_modules: list[str]) -> dict[str, Any]:
@@ -142,6 +160,13 @@ def enrich_web(
         if reg_website:
             website_record, first_metrics = fetch_website(reg_website, timeout=timeout)
             add_metrics(first_metrics)
+            for alternate in registry_website_alternates(reg_website, website_record):
+                # Same registered domain only: www/non-www and http/https variants of the declared URL.
+                retry_record, retry_metrics = fetch_website(alternate, timeout=timeout)
+                add_metrics(retry_metrics)
+                if retry_record.get("status") == "available":
+                    website_record = retry_record
+                    break
             gated = apply_website_identity_gate(profile, website_record)
             gated_website = gated["website"]
             if (gated_website.get("value") or {}).get("identity_assessment", {}).get("publishable"):
