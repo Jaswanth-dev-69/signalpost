@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from typing import Any
 
@@ -93,6 +94,39 @@ def _bulk_registry_values(profile: dict[str, Any], record: dict[str, Any]) -> di
         "founded_date": (raw.get("stiftelsesdato") or None) if isinstance(raw, dict) else None,
         "homepage": profile.get("website") or None,
     }
+
+
+LIVE_JSON_KEYS = {
+    "legal_name": "navn",
+    "legal_form": "kode",
+    "municipality": "kommune",
+    "industry_code": "kode",
+    "industry_label": "beskrivelse",
+    "registry_employees": "antallAnsatte",
+    "status_bankrupt": "konkurs",
+    "status_liquidating": "underAvvikling",
+    "founded_date": "stiftelsesdato",
+    "homepage": "hjemmeside",
+}
+
+
+def _role_literal(role: dict[str, Any]) -> str:
+    """Literal fragments of the roles API JSON: role description plus the holder's name fields."""
+    parts = [f'"beskrivelse":{json.dumps(role.get("role"), ensure_ascii=False)}'] if role.get("role") else []
+    if role.get("first_name") or role.get("last_name"):
+        if role.get("first_name"):
+            parts.append(f'"fornavn":{json.dumps(role["first_name"], ensure_ascii=False)}')
+        if role.get("last_name"):
+            parts.append(f'"etternavn":{json.dumps(role["last_name"], ensure_ascii=False)}')
+    elif role.get("name"):
+        parts.append(f'"navn":{json.dumps(role["name"], ensure_ascii=False)}')
+    return " | ".join(parts)
+
+
+def _period_literal(period: Any) -> str:
+    if isinstance(period, dict) and period.get("fraDato") and period.get("tilDato"):
+        return f'"fraDato":"{period["fraDato"]}" | "tilDato":"{period["tilDato"]}"'
+    return f"regnskapsperiode: {_period_text(period)}"
 
 
 REGISTRY_KEYS = {
@@ -215,7 +249,13 @@ def profile_to_contract_envelope(
     def registry_evidence(field: str, value: Any) -> str | None:
         span = f"{org} {REGISTRY_KEYS.get(field, field)}: {_span_value(value)}"
         if live_ok and (not bulk_ok or live_values.get(field) == value):
-            return evidence_from(live, span, f"registry_{field}", "official_registry_live")
+            # Literal fragments of the API's compact JSON, so the quote can be found verbatim.
+            live_span = f'"organisasjonsnummer":"{org}" | ' + (
+                f'"{LIVE_JSON_KEYS[field]}":{json.dumps(value, ensure_ascii=False)}'
+                if value not in (None, "") and field in LIVE_JSON_KEYS
+                else f"{REGISTRY_KEYS.get(field, field)}: not registered"
+            )
+            return evidence_from(live, live_span, f"registry_{field}", "official_registry_live")
         if bulk_ok:
             return evidence_from(bulk, span, f"registry_{field}", "official_registry_bulk")
         return None
@@ -271,9 +311,9 @@ def profile_to_contract_envelope(
         period = _period_text(latest.get("period"))
         for field, key, label in FINANCIAL_FIELDS:
             value = latest.get(key)
-            ev = evidence_from(fin_rec, f"regnskapsperiode {period}: {label} {_span_value(value)}", f"financials_{field}", "official_annual_accounts")
+            ev = evidence_from(fin_rec, f"{_period_literal(latest.get('period'))} | " + (f'"{label}":{value:.2f}' if isinstance(value, (int, float)) else f"{label}: not reported"), f"financials_{field}", "official_annual_accounts")
             add_claim(field, value, "available" if value is not None else "not_available", 1.0, [ev])
-        ev = evidence_from(fin_rec, f"regnskapsperiode: {period}", "financials_period", "official_annual_accounts")
+        ev = evidence_from(fin_rec, _period_literal(latest.get("period")), "financials_period", "official_annual_accounts")
         add_claim("reporting_period", latest.get("period"), "available" if latest.get("period") is not None else "not_available", 1.0, [ev])
     else:
         if fin_status == "available":
@@ -292,7 +332,7 @@ def profile_to_contract_envelope(
     if roles_rec.get("status") == "available":
         role_items = (roles_rec.get("value") or {}).get("roles") or []
         active_roles = [r for r in role_items if not r.get("inactive")]
-        span = "; ".join(f"{r.get('role') or r.get('role_code')}: {r.get('name')}" for r in active_roles[:12]) or f"roller {org}: no active role holders"
+        span = " | ".join(_role_literal(r) for r in active_roles[:4]) or f"roller {org}: no active role holders"
         ev = evidence_from(roles_rec, span, "roles", "official_roles")
         add_claim("registered_roles", active_roles, "available" if active_roles else "not_available", 1.0, [ev])
     elif roles_rec.get("status") == "not_found":
@@ -458,10 +498,12 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         pages = {p.get("url"): p for p in web_val.get("pages") or [] if p.get("url")}
         home_hash = web_val.get("content_sha256") or web_rec.get("content_sha256")
         home_time = web_rec.get("retrieved_at")
-        identity_text = " ".join(str(web_val.get(k) or "") for k in ("title", "description", "main_text_excerpt", "identity_text_excerpt"))
+        # Quote one contiguous field (never text joined across title/description/body).
+        fields = [str(web_val.get(k) or "") for k in ("title", "description", "main_text_excerpt")]
+        name_core = re.sub(r"\s+(AS|ASA|ANS|DA|ENK|SA|NUF)$", "", str(profile.get("name") or "").strip(), flags=re.I)
         span = (
-            _org_number_snippet(identity_text, org)
-            or _snippet(identity_text, str(profile.get("name") or "").split(" AS")[0])
+            next((snip for snip in (_org_number_snippet(f, org) for f in fields) if snip), None)
+            or next((snip for snip in (_snippet(f, name_core, 60) for f in fields) if snip), None)
             or web_val.get("title")
             or web_url
         )

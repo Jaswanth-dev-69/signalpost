@@ -76,6 +76,13 @@ def normalize_financials(body: Any) -> dict[str, Any]:
     records = body if isinstance(body, list) else []
     if not records:
         return {"records": []}
+    # The API lists years oldest-first and group (KONSERN) accounts before the company's own
+    # (SELSKAP). Publish the company's own accounts, newest period first.
+    records = sorted(
+        (item for item in records if isinstance(item, dict)),
+        key=lambda item: (item.get("regnskapstype") != "KONSERN", str(_get(item, "regnskapsperiode", "tilDato") or "")),
+        reverse=True,
+    )
     normalized = []
     for item in records[:3]:
         normalized.append({
@@ -132,6 +139,8 @@ def normalize_roles(body: Any) -> dict[str, Any]:
             display_name = " ".join(filter(None, [name.get("fornavn"), name.get("mellomnavn"), name.get("etternavn")])) or entity.get("navn")
             roles.append({
                 "name": display_name or None,
+                "first_name": name.get("fornavn") or None,
+                "last_name": name.get("etternavn") or None,
                 "organisation_number": entity.get("organisasjonsnummer"),
                 "role_code": _get(item, "type", "kode"),
                 "role": _get(item, "type", "beskrivelse"),

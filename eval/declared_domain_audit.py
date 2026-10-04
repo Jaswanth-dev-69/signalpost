@@ -70,9 +70,12 @@ def main() -> int:
                 declarers[domain].append((row["organisation_number"], row["name"]))
 
     hits, rows = [], []
-    for profile, value in declared:
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        audited = list(pool.map(lambda pv: audit_site(pv[1].get("final_url")), declared))
+    for (profile, value), (found, pages, title) in zip(declared, audited):
         org, url = profile["organisation_number"], value.get("final_url")
-        found, pages, title = audit_site(url)
         others = [o for o in found if o != org]
         domain = registered_domain(url)
         co_declarers = [d for d in declarers.get(domain, []) if d[0] != org]
