@@ -339,6 +339,44 @@ def profile_to_contract_envelope(
         },
     }
 
+BOILERPLATE = re.compile(r"cookie|informasjonskapsl|javascript|personvern|privacy|logg inn|log in|handlekurv|nettleser|browser", re.I)
+ABOUT_PATH = re.compile(r"om-oss|om_oss|omoss|about|selskapet|firma", re.I)
+
+
+def _first_paragraph(text: str, min_chars: int = 80, max_chars: int = 600) -> str | None:
+    for paragraph in re.split(r"\n\s*\n|\n", text or ""):
+        paragraph = " ".join(paragraph.split())
+        if len(paragraph) < min_chars or BOILERPLATE.search(paragraph) or paragraph.count(" ") < 8:
+            continue
+        if len(paragraph) <= max_chars:
+            return paragraph
+        cut = paragraph[:max_chars]
+        end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        return cut[: end + 1] if end >= min_chars else cut.rsplit(" ", 1)[0]
+    return None
+
+
+def _company_description(web_val: dict[str, Any], web_url: str) -> tuple[str | None, str | None]:
+    """Company-authored description: meta/og description, JSON-LD Organization description,
+    then the first substantive paragraph of the about page or the homepage."""
+    meta = " ".join(str(web_val.get("description") or "").split())
+    if len(meta) >= 20:
+        return meta, web_url
+    for org in web_val.get("structured_organisations") or []:
+        text = " ".join(str(org.get("description") or "").split()) if isinstance(org, dict) else ""
+        if len(text) >= 40 and not BOILERPLATE.search(text):
+            return text[:600], web_url
+    pages = web_val.get("pages") or []
+    for page in pages[1:]:
+        if ABOUT_PATH.search(str(page.get("url") or "")):
+            text = _first_paragraph(page.get("main_text_excerpt") or "")
+            if text:
+                return text, page.get("url")
+    text = _first_paragraph(web_val.get("main_text_excerpt") or "")
+    if text:
+        return text, web_url
+    return None, None
+
 
 def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, entity_ev, deadline_hit) -> None:
     org = profile["organisation_number"]
@@ -381,9 +419,12 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         proof_ev = add_evidence(proof_page.get("url"), "company_owned", proof_page.get("retrieved_at"), proof_page.get("content_sha256"), proof_page.get("claim_span"), "website_identity") if proof_page else None
         add_claim("official_website", web_url, "available", 0.98, [hjemmeside_ev, web_ev] if declared else [web_ev, proof_ev])
 
-        desc = str(web_val.get("description") or "").strip()
+        desc, desc_page = _company_description(web_val, web_url)
         if desc:
-            add_claim("company_description", desc, "available", 0.95, [add_evidence(web_url, "company_owned", home_time, home_hash, desc[:400], "description")])
+            page_ref = pages.get(desc_page) or {}
+            desc_hash = page_ref.get("content_sha256") or (home_hash if desc_page == web_url else None)
+            desc_time = page_ref.get("retrieved_at") or (home_time if desc_page == web_url else None)
+            add_claim("company_description", desc, "available", 0.95 if desc_page == web_url else 0.9, [add_evidence(desc_page, "company_owned", desc_time, desc_hash, desc[:400], "description")])
         else:
             add_claim("company_description", None, "not_available", 0.6, [web_ev])
 
