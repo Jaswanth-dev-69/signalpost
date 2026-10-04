@@ -14,6 +14,7 @@ THRESHOLD_OR_ACTIVITY_FORMS = {"ENK", "ANS", "DA", "SA", "FLI", "ESEK", "NUF", "
 
 BRREG_ENTITY = "https://data.brreg.no/enhetsregisteret/api/enheter/{org}"
 BRREG_ROLES = BRREG_ENTITY + "/roller"
+BRREG_SUBUNIT = "https://data.brreg.no/enhetsregisteret/api/underenheter/{org}"
 BRREG_GROUP = "https://data.brreg.no/enhetsregisteret/api/konsernstruktur/{org}"
 BRREG_SUBUNITS = "https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet={org}&size=1000"
 BRREG_ACCOUNTS = "https://data.brreg.no/regnskapsregisteret/regnskap/{org}"
@@ -167,6 +168,11 @@ def normalize_entity(body: Any) -> dict[str, Any]:
         "business_address": body.get("forretningsadresse"),
         "postal_address": body.get("postadresse"),
         "latest_submitted_accounts": body.get("sisteInnsendteAarsregnskap"),
+        "founded_date": body.get("stiftelsesdato"),
+        "registered_date": body.get("registreringsdatoEnhetsregisteret"),
+        "email": body.get("epostadresse"),
+        "deleted_date": body.get("slettedato"),
+        "parent_organisation_number": body.get("overordnetEnhet"),
     }
 
 
@@ -199,3 +205,12 @@ def fetch_official_modules(org: str, modules: set[str], fetcher: Callable[[str],
             normalized = normalize_entity(result.body) if module == "registry_live" else normalize_financials(result.body) if module == "financials" else normalize_financial_history(result.body, org) if module == "financial_history" else normalize_roles(result.body) if module == "roles" else normalize_locations(result.body) if module == "locations" else result.body
         records[module] = _classified(module, source_type, result, value=normalized)
     return records, metrics
+
+
+def fetch_subunit_record(org: str, fetcher: Callable[[str], FetchResult] = fetch_json) -> tuple[dict[str, Any], FetchResult]:
+    """Organisation numbers missing from /enheter may be registered sub-units (underenheter)."""
+    result = fetcher(BRREG_SUBUNIT.format(org=org))
+    normalized = None
+    if result.status == 200 and isinstance(result.body, dict):
+        normalized = normalize_entity({**result.body, "forretningsadresse": result.body.get("beliggenhetsadresse") or result.body.get("postadresse")})
+    return _classified("registry_underenhet", "official_registry_live", result, value=normalized), result

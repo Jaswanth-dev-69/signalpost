@@ -154,11 +154,12 @@ def apply_website_identity_gate(profile: dict[str, Any], website: dict[str, Any]
     value["discovered_social_links"] = original
     social_assessments = [assess_social_identity(profile, link) for link in original]
     value["social_link_assessments"] = social_assessments
+    # Links published from the company's own strictly verified website are
+    # company-owned claims. An unverified or ambiguous website publishes none.
     value["social_links"] = [
-        {"platform": item["platform"], "url": item["url"]}
-        for item in social_assessments
-        if assessment["publishable"] and item["publishable"]
-    ]
+        {"platform": item["platform"], "url": item["url"], "found_on_page": item.get("found_on_page")}
+        for item in original
+    ] if assessment["publishable"] else []
     website["value"] = value
     return {
         "website": website,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Iterable
@@ -59,7 +60,8 @@ def profiles_from_bulk(path: str | Path, organisation_numbers: Iterable[str]) ->
     requested = list(organisation_numbers)
     wanted = set(requested)
     snapshot_sha256 = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    retrieved_at = utc_now()
+    # The snapshot's fetch time is when the file was downloaded, not when it is parsed.
+    retrieved_at = datetime.fromtimestamp(Path(path).stat().st_mtime, timezone.utc).isoformat().replace("+00:00", "Z")
     found: dict[str, dict[str, Any]] = {}
     scanned = 0
     for profile in iter_bulk(path):
@@ -102,7 +104,18 @@ def profiles_from_bulk(path: str | Path, organisation_numbers: Iterable[str]) ->
                 "website": None,
                 "latest_submitted_accounts": None,
                 "missing_from_snapshot": True,
-                "evidence": {},
+                "evidence": {
+                    "registry_bulk_absent": evidence(
+                        "registry",
+                        "not_found",
+                        "official_registry_bulk",
+                        "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv",
+                        note="not present in the bulk entity snapshot",
+                        retrieved_at=retrieved_at,
+                        content_sha256=snapshot_sha256,
+                        source_row_key=org,
+                    ),
+                },
             }
     return [found[org] for org in requested], {
         "registry_snapshot_sha256": snapshot_sha256,

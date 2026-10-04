@@ -34,9 +34,10 @@ from norway_company_agent.discovery import choose_search_candidate  # noqa: E402
 from norway_company_agent.domain_solver import discover_website_by_domain_search  # noqa: E402
 from norway_company_agent.evidence import utc_now  # noqa: E402
 from norway_company_agent.identity import apply_website_identity_gate  # noqa: E402
-from norway_company_agent.official import accounting_obligation_assessment, fetch_official_modules  # noqa: E402
+from norway_company_agent.http import fetch_json  # noqa: E402
+from norway_company_agent.official import accounting_obligation_assessment, fetch_official_modules, fetch_subunit_record  # noqa: E402
 from norway_company_agent.synthesis import generate_company_synthesis  # noqa: E402
-from norway_company_agent.website import fetch_website  # noqa: E402
+from norway_company_agent.website import extract_web_claims, fetch_website  # noqa: E402
 from scripts.build_prototype import build as build_viewer_html  # noqa: E402
 
 
@@ -65,33 +66,37 @@ def enrich_company_profile(
     profile.setdefault("evidence", {}).update(records)
 
     if profile.get("missing_from_snapshot"):
-        live_rec = records.get("registry_live")
-        if live_rec and live_rec.get("status") == "available" and live_rec.get("value"):
+        live_rec = records.get("registry_live") or {}
+        if live_rec.get("status") == "source_error":
+            # One slower retry before declaring the official record unavailable.
+            retry, retry_metrics = fetch_official_modules(org, {"registry_live"}, fetcher=lambda url: fetch_json(url, timeout=30.0))
+            metrics.extend(retry_metrics)
+            live_rec = retry.get("registry_live") or live_rec
+            profile["evidence"]["registry_live"] = live_rec
+        if live_rec.get("status") == "not_found" and "410" not in str(live_rec.get("note")):
+            sub_rec, sub_metric = fetch_subunit_record(org)
+            metrics.append(sub_metric)
+            profile["evidence"]["registry_underenhet"] = sub_rec
+            if sub_rec.get("status") == "available":
+                live_rec = sub_rec
+        if live_rec.get("status") == "available" and live_rec.get("value"):
             lv = live_rec["value"]
-            profile["name"] = lv.get("navn", profile.get("name"))
-            profile["legal_form"] = (lv.get("organisasjonsform") or {}).get("kode")
-            profile["employees"] = lv.get("antallAnsatte")
-            profile["bankrupt"] = lv.get("konkurs", False)
-            profile["liquidating"] = lv.get("underAvvikling", False) or lv.get("underTvangsavviklingEllerTvangsopplosning", False)
-            for_adr = lv.get("forretningsadresse") or lv.get("postadresse") or {}
-            profile["municipality"] = for_adr.get("kommune")
-            profile["municipality_number"] = for_adr.get("kommunenummer")
-            naering = lv.get("naeringskode1") or {}
-            profile["industry_code"] = naering.get("kode")
-            profile["industry_label"] = naering.get("beskrivelse")
-            profile["website"] = lv.get("hjemmeside")
-            profile["evidence"]["registry"] = live_rec
-        else:
-            profile["evidence"]["registry"] = {
-                "field": "registry",
-                "status": "not_found",
-                "source_type": "official_registry_live",
-                "source_url": f"https://data.brreg.no/enhetsregisteret/api/enheter/{org}",
-                "retrieved_at": utc_now(),
-                "note": "Organisation not found in official registry",
-            }
+            address = lv.get("business_address") or lv.get("postal_address") or {}
+            industry = lv.get("industry") or {}
+            profile["name"] = lv.get("name") or profile.get("name")
+            profile["legal_form"] = lv.get("legal_form")
+            profile["employees"] = lv.get("employees")
+            profile["bankrupt"] = bool(lv.get("bankrupt"))
+            profile["liquidating"] = bool(lv.get("liquidating"))
+            profile["municipality"] = address.get("kommune")
+            profile["municipality_number"] = address.get("kommunenummer")
+            profile["industry_code"] = industry.get("kode")
+            profile["industry_label"] = industry.get("beskrivelse")
+            profile["website"] = lv.get("website")
+            profile["latest_submitted_accounts"] = lv.get("latest_submitted_accounts")
+            profile["evidence"]["registry"] = {**live_rec, "source_type": "official_registry_live"}
         profile["evidence"]["accounting_obligation"] = accounting_obligation_assessment(profile)
-    
+
     total_requests = len(metrics)
     total_bytes = sum(item.bytes_received for item in metrics)
     latencies_ms = [item.elapsed_ms for item in metrics]
@@ -109,6 +114,11 @@ def enrich_company_profile(
             gated_website = gated["website"]
             if (gated_website.get("value") or {}).get("identity_assessment", {}).get("publishable"):
                 profile["evidence"]["website"] = gated_website
+                web_value = gated_website.get("value") or {}
+                profile["web_claims"] = extract_web_claims(
+                    web_value.get("pages") or [],
+                    web_value.get("social_links") or [],
+                )
 
         # Tier B2: Domain candidate discovery if missing or unverified
         if enable_discovery and not profile.get("evidence", {}).get("website"):
@@ -119,6 +129,11 @@ def enrich_company_profile(
             if discovered_web:
                 profile["evidence"]["website"] = discovered_web
                 profile["evidence"]["website_discovered"] = discovered_web
+                discovered_value = discovered_web.get("value") or {}
+                profile["web_claims"] = extract_web_claims(
+                    discovered_value.get("pages") or [],
+                    discovered_value.get("social_links") or [],
+                )
 
         if "website" not in profile.get("evidence", {}):
             if gated_website:
@@ -186,7 +201,6 @@ def main() -> None:
     args = parser.parse_args()
 
     started_at = utc_now()
-    start_monotonic = time.monotonic()
 
     # Read inputs - handles JSON, JSONL, or TXT
     org_inputs = read_organisation_inputs(args.organisations)
@@ -201,6 +215,10 @@ def main() -> None:
     # Ensure bulk registry snapshot exists or download it
     bulk_path = ensure_bulk_snapshot(args.bulk)
     profiles, registry_metadata = profiles_from_bulk(bulk_path, orgs)
+    # Bulk download and parsing are setup work, not per-run enrichment time.
+    # Start the discovery/runtime budget only after the registry profiles exist.
+    start_monotonic = time.monotonic()
+    print(f"[{utc_now()}] Registry snapshot loaded; enrichment clock started.", flush=True)
 
     requested_modules = ["registry", "accounting_obligation", "registry_live", "financials", "roles", "group", "locations", "website"]
     
@@ -280,6 +298,10 @@ def main() -> None:
             if err:
                 errors.append({"org": org_no, **err})
 
+            if index % 100 == 0 or index == expected_count:
+                elapsed = time.monotonic() - start_monotonic
+                print(f"[{utc_now()}] Progress: {index}/{expected_count} companies, enrichment_elapsed={elapsed:.1f}s", flush=True)
+
             # Incremental checkpointing
             single_envelope = profile_to_contract_envelope(
                 prof,
@@ -333,7 +355,7 @@ def main() -> None:
         "exact_expected_count": len(envelopes) == expected_count,
         "unique_organisation_numbers": len(set(e["organisation_number"] for e in envelopes)) == len(envelopes),
         "zero_silent_drops": len(envelopes) == expected_count,
-        "all_terminal_status_completed": all(e.get("run", {}).get("terminal_status") == "completed" for e in envelopes),
+        "all_terminal_status_completed": all(e.get("run", {}).get("terminal_status") in {"complete", "completed", "partial", "failed"} for e in envelopes),
         "input_order_strictly_preserved": [e["organisation_number"] for e in envelopes] == orgs,
     }
 

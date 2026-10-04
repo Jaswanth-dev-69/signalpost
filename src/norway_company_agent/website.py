@@ -10,6 +10,7 @@ import urllib.parse
 import urllib.request
 import urllib.robotparser
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -33,7 +34,22 @@ SOCIAL_HOSTS = {
 PRIORITY_TERMS = (
     "om-oss", "om_oss", "about", "kontakt", "contact", "ledelse", "management",
     "team", "people", "locations", "lokasjoner", "avdelinger", "butikker",
-    "news", "press", "aktuelt", "nyheter",
+    "news", "press", "aktuelt", "nyheter", "blog", "blogg", "presse",
+    "ledige-stillinger", "stillinger", "karriere", "career", "careers",
+    "jobb", "jobs", "rekruttering", "bli-med", "work-with-us",
+)
+
+NEWS_TERMS = ("aktuelt", "nyheter", "nyhet", "news", "blog", "blogg", "presse", "siste-nytt", "artikler")
+JOB_TERMS = ("ledige-stillinger", "stillinger", "karriere", "career", "careers", "jobb", "jobs", "rekruttering", "bli-med", "work-with-us")
+JOB_PLATFORM_HOSTS = {"finn.no", "webcruiter.no", "webcruiter.com", "easycruit.com", "teamtailor.com", "recman.no"}
+NORWEGIAN_MONTHS = {
+    "januar": "01", "februar": "02", "mars": "03", "april": "04", "mai": "05", "juni": "06",
+    "juli": "07", "august": "08", "september": "09", "oktober": "10", "november": "11", "desember": "12",
+}
+DATE_PATTERN = re.compile(
+    r"\b(?:20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[./-]\d{1,2}[./-]20\d{2}|"
+    r"\d{1,2}\.\s*(?:januar|februar|mars|april|mai|juni|juli|august|september|oktober|november|desember)\s+20\d{2})\b",
+    re.IGNORECASE,
 )
 
 
@@ -141,6 +157,65 @@ def structured_social_links(value: Any) -> list[dict[str, str]]:
     return sorted(found.values(), key=lambda item: (item["platform"], item["url"]))
 
 
+def extract_web_claims(pages: list[dict[str, Any]], social_links: list[dict[str, str]]) -> dict[str, Any]:
+    """Extract only dated, company-owned web items from already fetched pages."""
+    profiles = [
+        {"platform": item["platform"], "url": item["url"], "found_on_page": item.get("found_on_page")}
+        for item in social_links
+    ]
+    news_items: list[dict[str, Any]] = []
+    job_postings: list[dict[str, Any]] = []
+    careers_page: str | None = None
+    careers_content_sha256: str | None = None
+    retrieved_at = next((p.get("retrieved_at") for p in pages if p.get("retrieved_at")), None)
+    for page in pages:
+        url = str(page.get("url") or "")
+        path = urllib.parse.urlparse(url).path.casefold()
+        text = str(page.get("main_text_excerpt") or "")
+        date_candidates = [str(item) for item in page.get("date_candidates") or []]
+        date_match = DATE_PATTERN.search(text)
+        published_date = date_candidates[0] if date_candidates else (date_match.group(0) if date_match else None)
+        if any(term in path for term in NEWS_TERMS) and published_date:
+            title = str(page.get("title") or "").strip()
+            if title:
+                news_items.append({
+                    "title": title,
+                    "url": url,
+                    "published_date": published_date,
+                    "source_page": url,
+                    "content_sha256": page.get("content_sha256"),
+                })
+        if any(term in path for term in JOB_TERMS):
+            careers_page = careers_page or url
+            careers_content_sha256 = careers_content_sha256 or page.get("content_sha256")
+            # Preserve a dated posting only when the page exposes a clear title/date pair.
+            if published_date:
+                title = str(page.get("title") or "").strip()
+                if title:
+                    job_postings.append({
+                        "title": title,
+                        "url": url,
+                        "posted_date": published_date,
+                        "source_page": url,
+                        "content_sha256": page.get("content_sha256"),
+                    })
+    return {
+        "social": {"profiles": profiles, "status": "available" if profiles else "not_available"},
+        "news": {
+            "items": news_items,
+            "status": "available" if news_items else "not_available",
+            "retrieved_at": retrieved_at,
+        },
+        "jobs": {
+            "postings": job_postings,
+            "careers_page": careers_page,
+            "careers_content_sha256": careers_content_sha256,
+            "retrieved_at": retrieved_at,
+            "status": "available" if job_postings else ("not_available" if careers_page else "not_available"),
+        },
+    }
+
+
 def normalize_social_url(url: str) -> dict[str, str] | None:
     try:
         parsed = urllib.parse.urlparse(url)
@@ -186,7 +261,7 @@ def normalize_social_url(url: str) -> dict[str, str] | None:
     return {"platform": platform, "url": f"https://{canonical_host}/{'/'.join(parts)}"}
 
 
-def _priority_links(base_url: str, soup: BeautifulSoup, limit: int = 4) -> list[str]:
+def _priority_links(base_url: str, soup: BeautifulSoup, limit: int = 4, include_common_paths: bool = False) -> list[str]:
     base = urllib.parse.urlparse(base_url)
     candidates: dict[str, int] = {}
     for anchor in soup.select("a[href]"):
@@ -203,6 +278,15 @@ def _priority_links(base_url: str, soup: BeautifulSoup, limit: int = 4) -> list[
         if clean.rstrip("/") == base_url.rstrip("/"):
             continue
         candidates[clean] = min(rank, candidates.get(clean, rank))
+    if include_common_paths:
+        common_paths = (
+            "/aktuelt", "/nyheter", "/nyhet", "/news", "/blogg", "/blog", "/presse",
+            "/siste-nytt", "/artikler", "/ledige-stillinger", "/stillinger", "/karriere",
+            "/jobb", "/jobs", "/careers", "/rekruttering", "/bli-med",
+        )
+        for index, path in enumerate(common_paths, start=len(PRIORITY_TERMS)):
+            clean = urllib.parse.urljoin(base_url, path)
+            candidates.setdefault(clean, index)
     return [url for url, _ in sorted(candidates.items(), key=lambda item: (item[1], item[0]))[:limit]]
 
 
@@ -223,11 +307,15 @@ def _fetch_secondary_page(url: str, *, homepage_domain: str, timeout: float, max
         page_html = raw.decode("utf-8", errors="replace")
         page_soup = BeautifulSoup(page_html, "lxml")
         page_text = trafilatura.extract(page_html, url=final_url, include_links=False, include_tables=False, favor_precision=True) or ""
+        page_dates = [str(node.get("datetime")).strip() for node in page_soup.select("time[datetime]") if node.get("datetime")]
+        page_dates.extend(re.findall(r'"datePublished"\s*:\s*"([^"]+)"', page_html, re.IGNORECASE))
         page = {
             "url": final_url,
             "title": page_soup.title.get_text(" ", strip=True)[:500] if page_soup.title else "",
             "main_text_excerpt": page_text[:5000],
             "content_sha256": __import__("hashlib").sha256(raw).hexdigest(),
+            "retrieved_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "date_candidates": page_dates,
         }
         return page, _social_links(final_url, page_soup), 2, len(raw), elapsed, None
     except Exception as exc:
@@ -282,6 +370,7 @@ def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_
                 return evidence("website", "source_error", "registry_linked_company_website", normalized, note=f"Unsupported content type: {content_type}"), {"requests": 2, "bytes": len(raw), "latencies_ms": [elapsed]}
             final_url = response.geturl()
             assert_public_url(final_url)
+        fetched_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         html = raw.decode("utf-8", errors="replace")
         soup = BeautifulSoup(html, "lxml")
         structured = extruct.extract(html, base_url=final_url, syntaxes=["json-ld", "microdata", "opengraph"])
@@ -301,14 +390,27 @@ def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_
             "content_sha256": __import__("hashlib").sha256(raw).hexdigest(),
             "extraction_state": _extraction_state(text, soup),
         }
-        pages = [{"url": final_url, "title": title[:500], "main_text_excerpt": text[:5000], "content_sha256": value["content_sha256"]}]
-        social = value["social_links"]
+        page_dates = [str(node.get("datetime")).strip() for node in soup.select("time[datetime]") if node.get("datetime")]
+        page_dates.extend(re.findall(r'"datePublished"\s*:\s*"([^"]+)"', html, re.IGNORECASE))
+        pages = [{
+            "url": final_url,
+            "title": title[:500],
+            "main_text_excerpt": text[:5000],
+            "content_sha256": value["content_sha256"],
+            "retrieved_at": fetched_at,
+            "date_candidates": page_dates,
+        }]
+        social = [{**item, "found_on_page": final_url} for item in value["social_links"]]
+        social.extend(
+            {**item, "found_on_page": final_url}
+            for item in structured_social_links(structured)
+        )
         crawl_errors = []
         requests = 2
         bytes_received = len(raw)
         page_latencies = [elapsed]
         homepage_domain = value["registered_domain"]
-        for page_url in _priority_links(final_url, soup):
+        for page_url in _priority_links(final_url, soup, limit=12, include_common_paths=True):
             page, page_social, page_requests, page_bytes, page_elapsed, page_error = _fetch_secondary_page(
                 page_url,
                 homepage_domain=homepage_domain,
@@ -321,13 +423,13 @@ def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_
                 page_latencies.append(page_elapsed)
             if page:
                 pages.append(page)
-                social.extend(page_social)
+                social.extend({**item, "found_on_page": page["url"]} for item in page_social)
             elif page_error:
                 crawl_errors.append({"url": page_url, "error": page_error})
         value["pages"] = pages
         value["social_links"] = list({(item["platform"], item["url"]): item for item in social}.values())
         value["crawl_errors"] = crawl_errors
-        return evidence("website", "available", "registry_linked_company_website", final_url, value=value, note="Company-controlled claim layer; not an official registry fact", content_sha256=value["content_sha256"]), {"requests": requests, "bytes": bytes_received, "latencies_ms": page_latencies}
+        return evidence("website", "available", "registry_linked_company_website", final_url, value=value, note="Company-controlled claim layer; not an official registry fact", content_sha256=value["content_sha256"], retrieved_at=fetched_at), {"requests": requests, "bytes": bytes_received, "latencies_ms": page_latencies}
     except urllib.error.HTTPError as exc:
         elapsed = int((time.monotonic() - started) * 1000)
         status = "not_found" if exc.code in {404, 410} else "source_error"

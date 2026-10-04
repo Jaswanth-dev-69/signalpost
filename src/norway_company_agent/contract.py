@@ -1,12 +1,110 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any
+
+BULK_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv"
+WEB_FIELDS = ("official_website", "company_description", "social_profiles", "dated_news", "job_postings")
+FINANCIAL_FIELDS = (
+    ("revenue", "revenue", "sumDriftsinntekter"),
+    ("operating_result", "operating_result", "driftsresultat"),
+    ("annual_result", "annual_result", "aarsresultat"),
+    ("assets", "assets", "sumEiendeler"),
+    ("debt", "debt", "sumGjeld"),
+)
 
 
 def _evidence_id(source_url: str, field_name: str, index: int) -> str:
     raw = f"{source_url}:{field_name}:{index}"
     return "ev-" + hashlib.sha256(raw.encode()).hexdigest()[:12]
+
+
+def _valid_hash(value: Any) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
+
+
+def _span_value(value: Any) -> str:
+    if value is None:
+        return "(not registered)"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _period_text(period: Any) -> str:
+    if isinstance(period, dict):
+        return f"{period.get('fraDato') or '?'} - {period.get('tilDato') or '?'}"
+    return _span_value(period)
+
+
+def _snippet(text: str, needle: str, width: int = 90) -> str | None:
+    if not text or not needle:
+        return None
+    index = text.casefold().find(needle.casefold())
+    if index < 0:
+        return None
+    start = max(0, index - width)
+    return " ".join(text[start:index + len(needle) + width].split())
+
+
+def _org_number_snippet(text: str, org: str) -> str | None:
+    if not text or len(org) != 9:
+        return None
+    pattern = r"\s?".join(org[:3]) + r"\s?" + r"\s?".join(org[3:6]) + r"\s?" + r"\s?".join(org[6:])
+    match = re.search(r"(?<!\d)" + pattern + r"(?!\d)", text)
+    if not match:
+        return None
+    start = max(0, match.start() - 90)
+    return " ".join(text[start:match.end() + 90].split())
+
+
+def _live_registry_values(record: dict[str, Any]) -> dict[str, Any]:
+    value = record.get("value") or {}
+    address = value.get("business_address") or value.get("postal_address") or {}
+    industry = value.get("industry") or {}
+    return {
+        "legal_name": value.get("name"),
+        "legal_form": value.get("legal_form"),
+        "municipality": address.get("kommune"),
+        "industry_code": industry.get("kode"),
+        "industry_label": industry.get("beskrivelse"),
+        "registry_employees": value.get("employees"),
+        "status_bankrupt": bool(value.get("bankrupt")),
+        "status_liquidating": bool(value.get("liquidating")),
+        "founded_date": value.get("founded_date"),
+        "homepage": value.get("website") or None,
+    }
+
+
+def _bulk_registry_values(profile: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    raw = record.get("value") or {}
+    return {
+        "legal_name": profile.get("name"),
+        "legal_form": profile.get("legal_form"),
+        "municipality": profile.get("municipality"),
+        "industry_code": profile.get("industry_code"),
+        "industry_label": profile.get("industry_label"),
+        "registry_employees": profile.get("employees"),
+        "status_bankrupt": bool(profile.get("bankrupt")),
+        "status_liquidating": bool(profile.get("liquidating")),
+        "founded_date": (raw.get("stiftelsesdato") or None) if isinstance(raw, dict) else None,
+        "homepage": profile.get("website") or None,
+    }
+
+
+REGISTRY_KEYS = {
+    "legal_name": "navn",
+    "legal_form": "organisasjonsform.kode",
+    "municipality": "forretningsadresse.kommune",
+    "industry_code": "naeringskode1.kode",
+    "industry_label": "naeringskode1.beskrivelse",
+    "registry_employees": "antallAnsatte",
+    "status_bankrupt": "konkurs",
+    "status_liquidating": "underAvvikling",
+    "founded_date": "stiftelsesdato",
+    "homepage": "hjemmeside",
+}
 
 
 def profile_to_contract_envelope(
@@ -18,11 +116,18 @@ def profile_to_contract_envelope(
     terminal_status: str = "completed",
     third_party_cost_usd: float = 0.0,
 ) -> dict[str, Any]:
-    """Transform an enriched company profile into the official Signalpost output contract."""
+    """Transform an enriched company profile into the official Signalpost output contract.
+
+    Every evidence item carries the sha256 of bytes that were actually fetched (or of the
+    bulk snapshot file the row came from), the fetch time and a span quoting the value.
+    Every contract field is emitted with an explicit availability state.
+    """
     org = profile["organisation_number"]
     evidence_map: dict[str, dict[str, Any]] = {}
     evidence_id_by_key: dict[tuple[str, str], str] = {}
     claims: list[dict[str, Any]] = []
+    errors = list(profile.get("errors") or [])
+    deadline_hit = any(e.get("type") == "DeadlineExceeded" for e in errors)
 
     records = profile.get("evidence", {})
     run_metrics = profile.get("run_metrics", {})
@@ -31,13 +136,18 @@ def profile_to_contract_envelope(
     runtime_ms = sum(latencies) if latencies else 0
 
     def add_evidence(
-        source_url: str,
+        source_url: str | None,
         source_class: str,
-        retrieved_at: str,
-        content_sha256: str | None = None,
-        claim_span: str | None = None,
-        key_hint: str = "",
-    ) -> str:
+        retrieved_at: str | None,
+        content_sha256: str | None,
+        claim_span: str | None,
+        key_hint: str,
+    ) -> str | None:
+        # Evidence is only emitted for content that was really fetched: a real
+        # sha256 of the bytes, the true fetch time and a non-empty supporting span.
+        span = " ".join(str(claim_span or "").split())[:500]
+        if not source_url or not retrieved_at or not _valid_hash(content_sha256) or not span:
+            return None
         key = (source_url, key_hint)
         if key in evidence_id_by_key:
             return evidence_id_by_key[key]
@@ -48,183 +158,165 @@ def profile_to_contract_envelope(
             "source_url": source_url,
             "source_class": source_class,
             "retrieved_at": retrieved_at,
-            "content_sha256": content_sha256 or hashlib.sha256(source_url.encode()).hexdigest(),
-            "claim_span": claim_span or "",
+            "content_sha256": content_sha256,
+            "claim_span": span,
         }
         return ev_id
 
-    def add_claim(
-        field: str,
-        value: Any,
-        availability: str,
-        confidence: float,
-        ev_ids: list[str],
-    ) -> None:
+    def evidence_from(record: dict[str, Any], span: str, key_hint: str, default_class: str) -> str | None:
+        return add_evidence(
+            record.get("source_url"),
+            record.get("source_class") or record.get("source_type") or default_class,
+            record.get("retrieved_at"),
+            record.get("content_sha256"),
+            span,
+            key_hint,
+        )
+
+    def add_claim(field: str, value: Any, availability: str, confidence: float, ev_ids: list[str | None]) -> None:
+        ids = list(dict.fromkeys(e for e in ev_ids if e))
+        if availability == "available" and not ids:
+            # A value without fetched, hashed content behind it is not publishable.
+            availability, value, confidence = "failed", None, 0.0
+            errors.append({"field": field, "type": "EvidenceMissing", "error": "no fetched content hash for claim"})
         claims.append({
             "field": field,
-            "value": value,
+            "value": value if availability == "available" else None,
             "availability": availability,
             "confidence": round(confidence, 3),
-            "evidence_ids": ev_ids,
+            "evidence_ids": ids,
         })
 
-    # 1. Registry identity claims
-    reg_rec = records.get("registry_live", {}) or records.get("registry", {})
-    reg_url = f"https://data.brreg.no/enhetsregisteret/api/enheter/{org}"
-    reg_class = "official_registry_live" if "registry_live" in records else (reg_rec.get("source_class") or "official_registry_bulk")
-    reg_time = reg_rec.get("retrieved_at") or started_at
-    reg_hash = reg_rec.get("content_sha256")
+    def fetch_state(record: dict[str, Any] | None) -> str:
+        status = (record or {}).get("status")
+        if status == "not_found":
+            return "not_available"
+        if status == "blocked":
+            return "blocked"
+        return "failed"
 
-    reg_ev_id = add_evidence(
-        reg_url,
-        reg_class,
-        reg_time,
-        content_sha256=reg_hash,
-        claim_span=f"Legal entity {profile.get('name')} ({org})",
-        key_hint="registry",
-    )
+    # 1. Official registry record (live API preferred, bulk snapshot row otherwise)
+    live = records.get("registry_live") or {}
+    bulk = records.get("registry") or {}
+    live_ok = live.get("status") == "available" and _valid_hash(live.get("content_sha256"))
+    bulk_ok = bulk.get("status") == "available" and _valid_hash(bulk.get("content_sha256"))
+    if bulk_ok and bulk.get("source_type") == "official_registry_live":
+        # Company absent from the bulk file; its registry record was resolved live.
+        live, live_ok, bulk_ok = bulk, True, False
+    live_values = _live_registry_values(live) if live_ok else {}
+    bulk_values = _bulk_registry_values(profile, bulk) if bulk_ok else {}
+    registry_ok = live_ok or bulk_ok
+    profile_values = bulk_values or live_values
 
-    add_claim("legal_name", profile.get("name"), "available" if profile.get("name") else "not_available", 1.0, [reg_ev_id])
-    add_claim("organisation_number", org, "available", 1.0, [reg_ev_id])
-    add_claim("legal_form", profile.get("legal_form"), "available" if profile.get("legal_form") else "not_available", 1.0, [reg_ev_id])
-    add_claim("municipality", profile.get("municipality"), "available" if profile.get("municipality") else "not_available", 1.0, [reg_ev_id])
-    add_claim("industry_code", profile.get("industry_code"), "available" if profile.get("industry_code") else "not_available", 1.0, [reg_ev_id])
-    add_claim("industry_label", profile.get("industry_label"), "available" if profile.get("industry_label") else "not_available", 1.0, [reg_ev_id])
+    def registry_evidence(field: str, value: Any) -> str | None:
+        span = f"{org} {REGISTRY_KEYS.get(field, field)}: {_span_value(value)}"
+        if live_ok and (not bulk_ok or live_values.get(field) == value):
+            return evidence_from(live, span, f"registry_{field}", "official_registry_live")
+        if bulk_ok:
+            return evidence_from(bulk, span, f"registry_{field}", "official_registry_bulk")
+        return None
 
-    emp_val = profile.get("employees")
-    add_claim("registry_employees", emp_val, "available" if emp_val is not None else "not_available", 1.0, [reg_ev_id])
-    add_claim("status_bankrupt", bool(profile.get("bankrupt")), "available", 1.0, [reg_ev_id])
-    add_claim("status_liquidating", bool(profile.get("liquidating")), "available", 1.0, [reg_ev_id])
+    # Evidence that identifies the entity, reused for fields whose own source is unavailable.
+    entity_ev = None
+    if registry_ok:
+        entity_ev = registry_evidence("legal_name", profile_values.get("legal_name"))
+    absence_records = [r for r in (live, records.get("registry_underenhet") or {}, records.get("registry_bulk_absent") or {}) if r]
+    absence_ev = None
+    for record in absence_records:
+        if record.get("status") == "not_found":
+            note = record.get("note") or "not found"
+            absence_ev = absence_ev or evidence_from(record, f"organisation number {org}: {note}", "registry_absent", "official_registry_live")
+    entity_ev = entity_ev or absence_ev
 
-    # 2. Accounting obligation
-    acc_ob = records.get("accounting_obligation", {})
-    if acc_ob:
-        ob_ev_id = add_evidence(
-            acc_ob.get("source_url") or reg_url,
-            acc_ob.get("source_class") or "official_rule_interpretation",
-            acc_ob.get("retrieved_at") or started_at,
-            content_sha256=acc_ob.get("content_sha256"),
-            claim_span=str(acc_ob.get("value") or {}),
-            key_hint="accounting_obligation",
-        )
-        add_claim("accounting_obligation", acc_ob.get("value"), acc_ob.get("status", "available"), 1.0, [ob_ev_id])
-
-    # 3. Annual Accounts / Financials
-    fin_rec = records.get("financials", {})
-    fin_status = fin_rec.get("status")
-    if fin_status == "available" and fin_rec.get("value"):
-        fin_url = fin_rec.get("source_url") or f"https://data.brreg.no/regnskapsregisteret/regnskap/{org}"
-        fin_ev_id = add_evidence(
-            fin_url,
-            fin_rec.get("source_class") or "official_annual_accounts",
-            fin_rec.get("retrieved_at") or started_at,
-            content_sha256=fin_rec.get("content_sha256"),
-            claim_span="Normalized annual accounts",
-            key_hint="financials",
-        )
-        recs = (fin_rec.get("value") or {}).get("records") or []
-        if recs:
-            latest = recs[0]
-            add_claim("revenue", latest.get("revenue"), "available" if latest.get("revenue") is not None else "not_available", 1.0, [fin_ev_id])
-            add_claim("operating_result", latest.get("operating_result"), "available" if latest.get("operating_result") is not None else "not_available", 1.0, [fin_ev_id])
-            add_claim("annual_result", latest.get("annual_result"), "available" if latest.get("annual_result") is not None else "not_available", 1.0, [fin_ev_id])
-            add_claim("assets", latest.get("assets"), "available" if latest.get("assets") is not None else "not_available", 1.0, [fin_ev_id])
-            add_claim("debt", latest.get("debt"), "available" if latest.get("debt") is not None else "not_available", 1.0, [fin_ev_id])
-            add_claim("reporting_period", latest.get("period"), "available" if latest.get("period") is not None else "not_available", 1.0, [fin_ev_id])
-        else:
-            for f in ("revenue", "operating_result", "annual_result", "assets", "debt", "reporting_period"):
-                add_claim(f, None, "not_available", 1.0, [fin_ev_id])
+    if registry_ok:
+        add_claim("organisation_number", org, "available", 1.0, [registry_evidence("legal_name", profile_values.get("legal_name"))])
+        for field in ("legal_name", "legal_form", "municipality", "industry_code", "industry_label", "registry_employees", "founded_date"):
+            value = profile_values.get(field)
+            ev = registry_evidence(field, value)
+            add_claim(field, value, "available" if value not in (None, "") else "not_available", 1.0, [ev])
+        for field in ("status_bankrupt", "status_liquidating"):
+            value = profile_values.get(field)
+            add_claim(field, value, "available", 1.0, [registry_evidence(field, value)])
     else:
-        st = "not_applicable" if acc_ob.get("value", {}).get("classification") == "not_required" else "not_available" if fin_status == "not_found" else "failed" if fin_status in ("source_error", "failed") else "not_available"
-        for f in ("revenue", "operating_result", "annual_result", "assets", "debt", "reporting_period"):
-            add_claim(f, None, st, 0.9, [reg_ev_id])
+        # Not in the bulk snapshot and the live registry did not return an entity.
+        reg_state = "not_available" if absence_ev and live.get("status") == "not_found" else "failed"
+        if reg_state == "failed":
+            errors.append({"field": "registry", "type": "RegistryUnavailable", "error": live.get("note") or "live registry lookup failed"})
+        add_claim("organisation_number", org, "available" if absence_ev else "failed", 1.0 if absence_ev else 0.0, [absence_ev])
+        for field in ("legal_name", "legal_form", "municipality", "industry_code", "industry_label", "registry_employees", "founded_date", "status_bankrupt", "status_liquidating"):
+            add_claim(field, None, reg_state, 0.9, [absence_ev])
+
+    # 2. Accounting obligation (rule interpretation over the registry record)
+    acc_ob = records.get("accounting_obligation") or {}
+    acc_value = acc_ob.get("value") or {}
+    if registry_ok and acc_ob:
+        form_ev = registry_evidence("legal_form", profile_values.get("legal_form"))
+        filing_ev = None
+        if bulk_ok and acc_value.get("latest_submitted_accounts"):
+            filing_ev = evidence_from(bulk, f"{org} sisteInnsendteAarsregnskap: {acc_value.get('latest_submitted_accounts')}", "registry_latest_accounts", "official_registry_bulk")
+        add_claim("accounting_obligation", acc_value, acc_ob.get("status", "available") if acc_ob.get("status") != "not_found" else "not_available", 1.0, [filing_ev, form_ev])
+    else:
+        add_claim("accounting_obligation", None, "failed" if not absence_ev or live.get("status") != "not_found" else "not_available", 0.5, [entity_ev])
+
+    # 3. Annual accounts
+    fin_rec = records.get("financials") or {}
+    fin_status = fin_rec.get("status")
+    fin_records = (fin_rec.get("value") or {}).get("records") or [] if fin_status == "available" else []
+    if fin_status == "available" and fin_records:
+        latest = fin_records[0]
+        period = _period_text(latest.get("period"))
+        for field, key, label in FINANCIAL_FIELDS:
+            value = latest.get(key)
+            ev = evidence_from(fin_rec, f"regnskapsperiode {period}: {label} {_span_value(value)}", f"financials_{field}", "official_annual_accounts")
+            add_claim(field, value, "available" if value is not None else "not_available", 1.0, [ev])
+        ev = evidence_from(fin_rec, f"regnskapsperiode: {period}", "financials_period", "official_annual_accounts")
+        add_claim("reporting_period", latest.get("period"), "available" if latest.get("period") is not None else "not_available", 1.0, [ev])
+    else:
+        if fin_status == "available":
+            state, ev = "not_available", evidence_from(fin_rec, f"regnskap {org}: no annual accounts published", "financials_empty", "official_annual_accounts")
+        elif fin_status == "not_found":
+            state, ev = "not_available", evidence_from(fin_rec, f"regnskap {org}: {fin_rec.get('note') or 'HTTP 404'} (no annual accounts registered)", "financials_absent", "official_annual_accounts")
+        else:
+            state, ev = fetch_state(fin_rec if fin_rec else None), entity_ev
+        if state == "not_available" and acc_value.get("classification") == "not_required":
+            state = "not_applicable"
+        for field in ("revenue", "operating_result", "annual_result", "assets", "debt", "reporting_period"):
+            add_claim(field, None, state, 0.9, [ev or entity_ev])
 
     # 4. Roles
-    roles_rec = records.get("roles", {})
-    roles_status = roles_rec.get("status")
-    if roles_status == "available" and roles_rec.get("value"):
-        roles_url = roles_rec.get("source_url") or f"https://data.brreg.no/enhetsregisteret/api/enheter/{org}/roller"
-        roles_ev_id = add_evidence(
-            roles_url,
-            roles_rec.get("source_class") or "official_roles",
-            roles_rec.get("retrieved_at") or started_at,
-            content_sha256=roles_rec.get("content_sha256"),
-            claim_span="Registered role holders",
-            key_hint="roles",
-        )
+    roles_rec = records.get("roles") or {}
+    if roles_rec.get("status") == "available":
         role_items = (roles_rec.get("value") or {}).get("roles") or []
         active_roles = [r for r in role_items if not r.get("inactive")]
-        add_claim("registered_roles", active_roles, "available" if active_roles else "not_available", 1.0, [roles_ev_id])
+        span = "; ".join(f"{r.get('role') or r.get('role_code')}: {r.get('name')}" for r in active_roles[:12]) or f"roller {org}: no active role holders"
+        ev = evidence_from(roles_rec, span, "roles", "official_roles")
+        add_claim("registered_roles", active_roles, "available" if active_roles else "not_available", 1.0, [ev])
+    elif roles_rec.get("status") == "not_found":
+        ev = evidence_from(roles_rec, f"roller {org}: {roles_rec.get('note') or 'HTTP 404'}", "roles_absent", "official_roles")
+        add_claim("registered_roles", None, "not_available", 0.9, [ev or entity_ev])
     else:
-        add_claim("registered_roles", None, "not_available" if roles_status == "not_found" else "failed", 0.9, [reg_ev_id])
+        add_claim("registered_roles", None, fetch_state(roles_rec or None), 0.0, [entity_ev])
 
-    # 5. Locations / Subunits
-    loc_rec = records.get("locations", {})
-    loc_status = loc_rec.get("status")
-    if loc_status == "available" and loc_rec.get("value"):
-        loc_url = loc_rec.get("source_url") or f"https://data.brreg.no/enhetsregisteret/api/underenheter?overordnetEnhet={org}"
-        loc_ev_id = add_evidence(
-            loc_url,
-            loc_rec.get("source_class") or "official_subunits",
-            loc_rec.get("retrieved_at") or started_at,
-            content_sha256=loc_rec.get("content_sha256"),
-            claim_span="Registered subunits",
-            key_hint="locations",
-        )
+    # 5. Locations / subunits
+    loc_rec = records.get("locations") or {}
+    if loc_rec.get("status") == "available":
         subunits = (loc_rec.get("value") or {}).get("locations") or []
-        add_claim("registered_subunits", subunits, "available" if subunits else "not_available", 1.0, [loc_ev_id])
+        span = "; ".join(f"{s.get('organisation_number')} {s.get('name')}" for s in subunits[:12]) or f"underenheter overordnetEnhet={org}: totalElements 0"
+        ev = evidence_from(loc_rec, span, "locations", "official_subunits")
+        add_claim("registered_subunits", subunits, "available" if subunits else "not_available", 1.0, [ev])
+    elif loc_rec.get("status") == "not_found":
+        ev = evidence_from(loc_rec, f"underenheter overordnetEnhet={org}: {loc_rec.get('note') or 'HTTP 404'}", "locations_absent", "official_subunits")
+        add_claim("registered_subunits", None, "not_available", 0.9, [ev or entity_ev])
     else:
-        add_claim("registered_subunits", None, "not_available" if loc_status == "not_found" else "failed", 0.9, [reg_ev_id])
+        add_claim("registered_subunits", None, fetch_state(loc_rec or None), 0.0, [entity_ev])
 
-    # 6. Website & Social Links
-    web_rec = records.get("website", {}) or records.get("website_discovered", {})
-    web_status = web_rec.get("status")
-    web_val = web_rec.get("value") or {}
-    identity_assessment = web_val.get("identity_assessment") or {}
-    publishable = identity_assessment.get("publishable", False)
+    # 6. Company-owned web layer
+    _web_claims(profile, records, add_evidence, add_claim, registry_evidence if registry_ok else None, entity_ev, deadline_hit)
 
-    if web_status == "available" and publishable:
-        web_url = web_rec.get("source_url") or web_val.get("final_url") or "https://example.no"
-        web_ev_id = add_evidence(
-            web_url,
-            web_rec.get("source_class") or "company_owned",
-            web_rec.get("retrieved_at") or started_at,
-            content_sha256=web_rec.get("content_sha256"),
-            claim_span=web_val.get("main_text_excerpt") or web_val.get("title"),
-            key_hint="website",
-        )
-        add_claim("official_website", web_url, "available", 0.98, [web_ev_id])
-        if web_val.get("description"):
-            add_claim("company_description", web_val.get("description"), "available", 0.95, [web_ev_id])
-        socials = web_val.get("social_links") or []
-        add_claim("social_profiles", socials, "available" if socials else "not_available", 0.95, [web_ev_id])
-    elif web_status == "available" and not publishable:
-        web_url = web_rec.get("source_url") or "https://example.no"
-        web_ev_id = add_evidence(
-            web_url,
-            web_rec.get("source_class") or "company_owned",
-            web_rec.get("retrieved_at") or started_at,
-            content_sha256=web_rec.get("content_sha256"),
-            claim_span="Quarantined registry link - exact legal entity identity not established",
-            key_hint="website_quarantined",
-        )
-        add_claim("official_website", None, "ambiguous", 0.3, [web_ev_id])
-        add_claim("company_description", None, "ambiguous", 0.3, [web_ev_id])
-        add_claim("social_profiles", None, "ambiguous", 0.3, [web_ev_id])
-    elif web_status == "blocked":
-        add_claim("official_website", None, "blocked", 0.0, [reg_ev_id])
-        add_claim("company_description", None, "blocked", 0.0, [reg_ev_id])
-        add_claim("social_profiles", None, "blocked", 0.0, [reg_ev_id])
-    else:
-        add_claim("official_website", None, "not_available", 0.0, [reg_ev_id])
-        add_claim("company_description", None, "not_available", 0.0, [reg_ev_id])
-        add_claim("social_profiles", None, "not_available", 0.0, [reg_ev_id])
-
-    # 7. Summary Profile (Synthesis)
+    # 7. Summary profile (synthesis)
     summary_text = profile.get("synthesis_summary")
     if summary_text:
-        sum_ev_ids = list(evidence_map.keys())
-        add_claim("summary_profile", summary_text, "available", 0.95, sum_ev_ids)
+        add_claim("summary_profile", summary_text, "available", 0.95, list(evidence_map.keys()))
 
     return {
         "organisation_number": org,
@@ -237,10 +329,108 @@ def profile_to_contract_envelope(
         "claims": claims,
         "evidence": list(evidence_map.values()),
         "changes": profile.get("change_history") or [],
-        "errors": profile.get("errors") or [],
+        "errors": errors,
         "operations": {
             "requests": total_requests,
             "runtime_ms": runtime_ms,
             "third_party_cost_usd": third_party_cost_usd,
         },
     }
+
+
+def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, entity_ev, deadline_hit) -> None:
+    org = profile["organisation_number"]
+    web_rec = records.get("website") or {}
+    web_status = web_rec.get("status")
+    web_val = web_rec.get("value") or {}
+    publishable = (web_val.get("identity_assessment") or {}).get("publishable", False)
+    # The registry 'hjemmeside' value (or its absence) is the evidence for non-available web states.
+    hjemmeside_ev = registry_evidence("homepage", profile.get("website") or None) if registry_evidence else None
+
+    if web_status == "available" and publishable:
+        web_url = web_val.get("final_url") or web_rec.get("source_url")
+        pages = {p.get("url"): p for p in web_val.get("pages") or [] if p.get("url")}
+        home_hash = web_val.get("content_sha256") or web_rec.get("content_sha256")
+        home_time = web_rec.get("retrieved_at")
+        identity_text = " ".join(str(web_val.get(k) or "") for k in ("title", "description", "main_text_excerpt", "identity_text_excerpt"))
+        span = (
+            _org_number_snippet(identity_text, org)
+            or _snippet(identity_text, str(profile.get("name") or "").split(" AS")[0])
+            or web_val.get("title")
+            or web_url
+        )
+        web_ev = add_evidence(web_url, "company_owned", home_time, home_hash, span, "website")
+        # The identity proof may sit on a subpage (e.g. /kontakt with the org number).
+        proof_page = web_val.get("identity_proof_page") or {}
+        proof_ev = add_evidence(proof_page.get("url"), "company_owned", proof_page.get("retrieved_at"), proof_page.get("content_sha256"), proof_page.get("claim_span"), "website_identity") if proof_page else None
+        add_claim("official_website", web_url, "available", 0.98, [web_ev, proof_ev])
+
+        desc = str(web_val.get("description") or "").strip()
+        if desc:
+            add_claim("company_description", desc, "available", 0.95, [add_evidence(web_url, "company_owned", home_time, home_hash, desc[:400], "description")])
+        else:
+            add_claim("company_description", None, "not_available", 0.6, [web_ev])
+
+        web_claims = profile.get("web_claims") or {}
+        socials = (web_claims.get("social") or {}).get("profiles") or web_val.get("social_links") or []
+        social_values, social_evs = [], []
+        for item in socials:
+            page = pages.get(item.get("found_on_page")) or {}
+            source = item.get("found_on_page") or web_url
+            page_hash = page.get("content_sha256") or (home_hash if source == web_url else None)
+            page_time = page.get("retrieved_at") or (home_time if source == web_url else None)
+            ev = add_evidence(source, "company_owned", page_time, page_hash, f"{item.get('href') or item['url']}", f"social_{item['url']}")
+            if ev:
+                social_values.append({"platform": item["platform"], "url": item["url"], "found_on_page": source})
+                social_evs.append(ev)
+        if social_values:
+            add_claim("social_profiles", social_values, "available", 0.95, social_evs)
+        else:
+            add_claim("social_profiles", None, "not_available", 0.6, [web_ev])
+
+        news = web_claims.get("news") or {}
+        items, item_evs = [], []
+        for item in (news.get("items") or [])[:10]:
+            ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"news_{item.get('url')}")
+            if ev:
+                items.append({k: item.get(k) for k in ("title", "url", "published_date", "date_source", "source_page")})
+                item_evs.append(ev)
+        if items:
+            add_claim("dated_news", items, "available", 0.9, item_evs)
+        else:
+            checked = [add_evidence(p.get("url"), "company_owned", p.get("retrieved_at"), p.get("content_sha256"), p.get("claim_span"), "news_checked") for p in news.get("checked_pages") or []]
+            add_claim("dated_news", None, "failed" if deadline_hit else "not_available", 0.6, [*checked[:3], web_ev])
+
+        jobs = web_claims.get("jobs") or {}
+        postings, job_evs = [], []
+        for item in (jobs.get("postings") or [])[:25]:
+            ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"job_{item.get('url')}")
+            if ev:
+                postings.append({k: item.get(k) for k in ("title", "url", "posted_date", "platform", "source_page") if item.get(k)})
+                job_evs.append(ev)
+        careers = jobs.get("careers_page") if isinstance(jobs.get("careers_page"), dict) else {}
+        careers_ev = add_evidence(careers.get("url"), "company_owned", careers.get("retrieved_at"), careers.get("content_sha256"), careers.get("claim_span"), "careers_page") if careers else None
+        if postings:
+            add_claim("job_postings", postings, "available", 0.9, job_evs)
+        elif careers_ev:
+            add_claim("job_postings", None, "not_available", 0.8, [careers_ev])
+        else:
+            add_claim("job_postings", None, "failed" if deadline_hit else "not_available", 0.6, [web_ev])
+        return
+
+    if web_status == "available":
+        # Website fetched but the strict entity gate did not pass: publish nothing from it.
+        web_url = web_val.get("final_url") or web_rec.get("source_url")
+        span = web_val.get("title") or web_url
+        ev = add_evidence(web_url, "company_owned", web_rec.get("retrieved_at"), web_val.get("content_sha256") or web_rec.get("content_sha256"), f"{span} (exact legal entity not established)", "website_quarantined")
+        state, evs = "ambiguous", [ev, hjemmeside_ev]
+    elif deadline_hit and not web_status:
+        state, evs = "failed", [hjemmeside_ev or entity_ev]
+    elif web_status == "blocked":
+        state, evs = "blocked", [hjemmeside_ev or entity_ev]
+    elif web_status in ("source_error", "failed"):
+        state, evs = "failed", [hjemmeside_ev or entity_ev]
+    else:
+        state, evs = "not_available", [hjemmeside_ev or entity_ev]
+    for field in WEB_FIELDS:
+        add_claim(field, None, state, 0.3 if state == "ambiguous" else 0.0, evs)
