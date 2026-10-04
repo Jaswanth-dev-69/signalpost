@@ -10,6 +10,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+RATE_LIMITED = {"count": 0}
+
+
 @dataclass
 class FetchResult:
     url: str
@@ -50,6 +53,8 @@ def fetch_json(url: str, *, timeout: float = 20.0, attempts: int = 3) -> FetchRe
                     body = None
                 return FetchResult(url, exc.code, elapsed, len(raw), body, error=f"HTTP {exc.code}", content_sha256=hashlib.sha256(raw).hexdigest(), retrieved_at=_utc_now())
             last_error = f"HTTP {exc.code}"
+            if exc.code == 429:
+                RATE_LIMITED["count"] += 1
             if exc.code == 429 or exc.code >= 500:
                 retry_after = exc.headers.get("Retry-After") if exc.headers else None
                 time.sleep(min(10.0, float(retry_after)) if retry_after and retry_after.isdigit() else 1.5 * (attempt + 1))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 import unicodedata
 from typing import Any
 
@@ -100,6 +101,7 @@ def discover_website_by_domain_search(
     profile: dict[str, Any],
     *,
     timeout: float = 8.0,
+    deadline: float | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Deterministic candidate-domain discovery. Only strict on-page proof is accepted; the
     registry_declared_domain rule never applies here."""
@@ -114,6 +116,8 @@ def discover_website_by_domain_search(
         key = candidate_url.removeprefix("https://").removeprefix("www.")
         if key in seen:
             continue
+        if deadline is not None and time.monotonic() > deadline:
+            break
         seen.add(key)
         total_metrics["candidates"] += 1
         website_record, metrics = fetch_website(candidate_url, timeout=timeout)

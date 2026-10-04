@@ -75,6 +75,7 @@ NUMERIC_DATE_TEXT = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(20\d{2})\b")
 ISO_DATE_TEXT = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
 URL_DATE = re.compile(r"/(20\d{2})[/-](\d{1,2})[/-](\d{1,2})(?:/|-|$)")
 
+RATE_LIMITED = {"count": 0}
 _robots_lock = threading.Lock()
 _robots_cache: dict[str, urllib.robotparser.RobotFileParser | None] = {}
 _host_lock = threading.Lock()
@@ -184,6 +185,8 @@ class SiteFetcher:
             self.cache[url] = page
             return page
         except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                RATE_LIMITED["count"] += 1
             self.errors.append({"url": url, "error": f"HTTP {exc.code}"})
         except Exception as exc:  # network, TLS, decode
             self.errors.append({"url": url, "error": f"{type(exc).__name__}: {str(exc)[:100]}"})
