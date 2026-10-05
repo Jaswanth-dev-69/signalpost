@@ -155,6 +155,50 @@ def declared_domain_counts(path: str | Path) -> dict[str, int]:
     return dict(counts)
 
 
+def start_declared_domain_count(path: str | Path, counter=None) -> dict[str, Any]:
+    """Start the snapshot-wide homepage count in the background (it overlaps pass 1)."""
+    import threading
+    import time
+
+    counter = counter or declared_domain_counts
+    handle: dict[str, Any] = {"started": time.monotonic()}
+
+    def work() -> None:
+        try:
+            handle["counts"] = counter(path)
+        except Exception as exc:  # reported, never raised: the run must still finish
+            handle["error"] = f"{type(exc).__name__}: {exc}"
+
+    handle["thread"] = threading.Thread(target=work, daemon=True)
+    handle["thread"].start()
+    return handle
+
+
+def finish_declared_domain_count(handle: dict[str, Any], cap_s: float) -> tuple[dict[str, int], dict[str, Any]]:
+    """Block until the count is done (at most `cap_s` from its start) and report what happened.
+
+    Fail-closed: on error, timeout or a snapshot without `hjemmeside` values the counts are empty,
+    and registry-declared homepages are then not published.
+    """
+    import time
+
+    handle["thread"].join(timeout=max(0.0, cap_s - (time.monotonic() - handle["started"])))
+    seconds = round(time.monotonic() - handle["started"], 1)
+    counts = handle.get("counts") or {}
+    if handle["thread"].is_alive():
+        status = {"status": "timeout", "error": f"scan exceeded {cap_s:.0f}s cap"}
+    elif "error" in handle:
+        status = {"status": "failed", "error": handle["error"]}
+    elif not counts:
+        status = {"status": "failed", "error": "snapshot has no hjemmeside values (column missing or empty)"}
+    else:
+        status = {"status": "ok", "error": None}
+    if status["status"] != "ok":
+        counts = {}
+    return counts, {**status, "domains": len(counts), "seconds": seconds,
+                    "effect": None if counts else "registry-declared homepages not published this run (fail-closed)"}
+
+
 def evidence_terminal_state(record: dict[str, Any] | None) -> str:
     if not record:
         return "submission_error"

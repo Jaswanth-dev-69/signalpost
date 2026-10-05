@@ -307,3 +307,18 @@ Options that need your decision (not done):
    check and a minimum of 3 characters: +0.5–1% website coverage on proxy-200, at a small risk.
 2. A search-API candidate source, if Builderr supplies a key (contract: "if you need a model key …
    ask and we will supply one"; search would need the same arrangement).
+
+# Hardening before packaging v3 (2026-10-05)
+
+## H1 Declared-domain count cannot fail silently (done)
+
+- The count starts in the background as soon as the snapshot is loaded (it overlaps pass 1). The
+  web pass then **blocks** on it, capped at min(300 s, a third of the time left before the web
+  reserve). Before, an exception inside the thread was swallowed, and the join was capped at 120 s.
+- Fail-closed, and visible: on an error, a timeout or a snapshot with no `hjemmeside` values, the
+  counts are empty, so registry-declared homepages are not published. The run logs `WARNING
+  declared-domain counts …` and the report carries `operations.declared_domain_counts` (`status`,
+  `error`, `domains`, `seconds`, `effect`).
+- Tests: a normal snapshot counts per domain; a missing column, a slow scan (timeout) and a crashing
+  scan are each reported and fail-closed. The proxy-200 check that the same websites are published
+  is in H4.

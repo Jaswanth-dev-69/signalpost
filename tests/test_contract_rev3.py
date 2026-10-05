@@ -284,5 +284,46 @@ class Refresh(unittest.TestCase):
         self.assertEqual((added[0]["change_type"], added[0]["effective_at"]), ("added", "2025-10-01T09:00:00+02:00"))
 
 
+class DeclaredDomainCount(unittest.TestCase):
+    """H1: the shared-domain count never fails silently and is fail-closed."""
+
+    def snapshot(self, header: str, rows: list[str]) -> str:
+        import gzip
+        import tempfile
+        handle = tempfile.NamedTemporaryFile(suffix=".csv.gz", delete=False)
+        handle.close()
+        with gzip.open(handle.name, "wt", encoding="utf-8") as out:
+            out.write(header + "\n" + "\n".join(rows) + "\n")
+        return handle.name
+
+    def run_count(self, path=None, counter=None, cap=10.0):
+        from norway_company_agent.batch import finish_declared_domain_count, start_declared_domain_count
+        return finish_declared_domain_count(start_declared_domain_count(path, counter), cap)
+
+    def test_normal_snapshot_counts_declarants_per_domain(self):
+        path = self.snapshot('"organisasjonsnummer","navn","hjemmeside"',
+                             ['"111111111","A AS","www.group.no"', '"222222222","B AS","group.no/b"', '"333333333","C AS","https://c.no"'])
+        counts, status = self.run_count(path)
+        self.assertEqual((status["status"], counts["group.no"], counts["c.no"]), ("ok", 2, 1))
+
+    def test_missing_hjemmeside_column_is_reported_and_fail_closed(self):
+        path = self.snapshot('"organisasjonsnummer","navn"', ['"111111111","A AS"'])
+        counts, status = self.run_count(path)
+        self.assertEqual((counts, status["status"]), ({}, "failed"))
+        self.assertIn("not published", status["effect"])
+
+    def test_slow_scan_times_out_and_is_fail_closed(self):
+        import time
+        counts, status = self.run_count(counter=lambda _: (time.sleep(2), {"x.no": 1})[1], cap=0.2)
+        self.assertEqual((counts, status["status"]), ({}, "timeout"))
+
+    def test_crashing_scan_is_reported_not_raised(self):
+        def boom(_):
+            raise OSError("disk")
+        counts, status = self.run_count(counter=boom)
+        self.assertEqual((counts, status["status"]), ({}, "failed"))
+        self.assertIn("disk", status["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
