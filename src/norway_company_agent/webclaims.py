@@ -25,7 +25,7 @@ import tldextract
 
 USER_AGENT = "builderr-signalpost-poc/0.1 (+https://builderr.ai)"
 FAMILY_FETCH_CAP = 6
-MAX_NEWS_ITEMS = 10
+MAX_NEWS_ITEMS = 20
 # Article pages are fetched so each dated item cites its own page; they have their own budget.
 FETCH_CAPS = {"news_article": MAX_NEWS_ITEMS}
 MAX_JOB_POSTINGS = 25

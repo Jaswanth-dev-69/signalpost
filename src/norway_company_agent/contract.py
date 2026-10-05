@@ -8,6 +8,7 @@ from typing import Any
 
 from .batch import evidence_terminal_state
 from .nav_jobs import company_orgnrs
+from .webclaims import MAX_NEWS_ITEMS
 
 BULK_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv"
 # The starter kit's module list; its envelope (run_id, state, modules, profile) is embedded as-is.
@@ -676,7 +677,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         news = web_claims.get("news") or {}
         news_count = 0
         news_seen: set[str] = set()
-        for item in (news.get("items") or [])[:10]:
+        for item in (news.get("items") or [])[:MAX_NEWS_ITEMS]:
             stamp = item.get("published_at") or item.get("published_date")
             value = news_value(item["title"], stamp)
             if value in news_seen:
