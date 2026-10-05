@@ -68,3 +68,23 @@ company.
   Statkraft, …) pass the kit's on-page name gate but not our strict proof. Publishing them would need a
   new gate rule, which is not allowed. Yield +2/360 is below what is worth a new runtime dependency,
   so it is not implemented.
+
+## Noise floor (frozen v3, same inputs)
+
+| Set | Runs | Spread (companies) | Spread (facts) |
+|---|---|---|---|
+| proxy-200 | 4 (261, 263, 257, 261 s) | **0 in every family** | **0 in every family** |
+| large-60 | 3 (285, 277, 277 s) | 1 in every family (one website the first run missed) | social 6, news 7, hiring 1 |
+
+So on proxy-200 any difference is real; on large-60, ±1 company is noise.
+
+## E5, E5b, E7, E6 (measured, all kept)
+
+| Experiment | proxy-200 | large-60 | sample-100 | Wall proxy-200 | Verdict |
+|---|---|---|---|---|---|
+| E5 careers depth 2 + sitemap + wider probes; full news probe set | hiring +1 / −1 (the −1 was a budget cut) | +1 everywhere (noise) | hiring **+2** | 270 s | Keep (with E5b) |
+| E5b careers before news | hiring **+1, −0** vs v3 (Scanmast via sitemap/depth 2; Eltele no longer cut) | noise | — | 261 s | Keep (gain above noise; robustness) |
+| E7 406 → `Accept: */*`; one homepage retry on timeout/429/5xx; 401/403 → `blocked` | no coverage change (the 500s still fail on retry) | Statkraft, Tomra, Jula now `blocked` (were `failed`) | no change | 260 s | Keep (robustness, honest states, no downside) |
+| E6 news cap 10 → 20 (same sources, own article page each) | news facts 163 → **196** (+20%; 7.09 → 8.52 per covered company), companies unchanged | 120 → 137 (+14%, above spread 7) | 251 → **312** (+24%) | 264 s (+1.5% vs E7) | Keep (cost well under +5%) |
+
+Wrong-company hits: none seen in any run (audits on the candidate are below).
