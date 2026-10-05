@@ -72,3 +72,34 @@ above 65. Branch `rev3`, cut from main at 0ded7110.
 C4: discovery. Careers links in nav menus to depth 2, sitemap-driven careers and news URLs,
 English paths. Then C3 (Accept header and HTTP 406; JS-shell declared homepages such as Elopak),
 C5 and C6.
+
+# Revision 3, phase 2 session (2026-10-05): kit baseline and parity
+
+## Step 1.1 (in progress): kit baseline
+
+- The original kit came from `https://builderr.ai/signalpost-starter-kit.tar.gz` (Last-Modified
+  2026-10-05 12:05 GMT) and was unpacked in the session scratchpad, outside the repo. The repo's
+  first commit is already modified, so it can't serve as the kit. `pyproject.toml` is identical.
+- The kit has **no** `scripts/evaluate_agent.py`. That file is ours (commit 0dd1db7), so its family
+  grouping is our own guess and not a Builderr hint.
+- Kit envelope: `{run_id, organisation_number, state, started_at, completed_at, modules, profile}`.
+  It has no `claims`, no `claim_span` and no `extraction_method`, and `effective_at` is null on
+  every record. It still scores Evidence 26.98, against our 24.99 with spans and methods.
+- In the kit, `profile.evidence.website.status` is `available` for **any** registry homepage that
+  loads, whatever the identity verdict (`value.identity_assessment.publishable`). `social_links` is
+  gated twice: the site must be exact **and** the handle must contain the legal-name tokens
+  (`assess_social_identity`).
+- Builderr's sample DATA (`/signalpost`, 100 rows; a copy is kept in the scratchpad) uses the same
+  record shape (`web.value.social_links`, `identity_assessment`) plus `external.handles`
+  (approved/experimental) and LinkedIn posts/jobs. It has **no** company-site news or careers shape.
+  33 of its 97 websites have no registry homepage in today's BRREG (`scheduler: scrapy_resumable_v1`),
+  so Builderr's own crawler discovers websites beyond the registry.
+- Kit on proxy-200 (250 s wall, 8 workers): registry website loaded for 64 companies, identity-exact
+  for 25, description 16, social 10 companies / 17 links, news 0, hiring 0.
+- Kit on sample-100 (187 s): website 64 (exact 55), description 41, social 28/59. Builderr's
+  sample: 97 (exact 84), description 60, social 44/91.
+- Early read: our v2 measured **more** exact websites (26%) and social (16%) on proxy-200 than the
+  kit (12.5% / 5%), yet scored about 5 recall points less. That points to the envelope shape (what
+  the scorer can read) rather than discovery.
+- New: `eval/kit_parity.py` (per-family companies/facts for kit, ours and the sample, with
+  kit-only/ours-only companies) and `docs/QUESTIONS_FOR_BUILDERR.md`.
