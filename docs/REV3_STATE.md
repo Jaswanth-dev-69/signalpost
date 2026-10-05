@@ -322,3 +322,23 @@ Options that need your decision (not done):
 - Tests: a normal snapshot counts per domain; a missing column, a slow scan (timeout) and a crashing
   scan are each reported and fail-closed. The proxy-200 check that the same websites are published
   is in H4.
+
+## H2 Refresh can never crash or drop an envelope (done)
+
+- The previous file is read line by line (`read_previous_with_stats`). Bad lines, rows without the
+  kit `profile` (v2 envelopes) and read errors are counted, never fatal. Refresh is wrapped per company:
+  a failure leaves that envelope as built, with `refresh.error`, and is counted in `refresh.failed`.
+  The run report's `refresh.baseline` shows rows, usable, bad_lines, without_profile and error. The
+  deadline flush and the final refresh each have a last-resort guard.
+- End to end on 5 companies, all exit 0 with **5/5 envelopes**:
+
+| Previous file | Rows / usable / bad / no profile | Compared | Failed |
+|---|---|---|---|
+| Missing | 0/0/0/0 | 0 | 0 |
+| Empty | 0/0/0/0 | 0 | 0 |
+| Truncated plus corrupt line | 2/1/1/0 | 1 | 0 |
+| v2-format envelopes | 5/0/0/5 | 0 | 0 |
+| Output from a different batch | 5/5/0/0 | 0 | 0 |
+
+- Unit tests cover the same cases, plus a malformed previous row that raises inside refresh
+  (counted as failed, envelope kept).

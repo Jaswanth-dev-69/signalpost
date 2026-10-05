@@ -33,7 +33,7 @@ sys.path.insert(1, str(ROOT))  # scripts.build_prototype, whatever the entry poi
 
 from norway_company_agent.batch import finish_declared_domain_count, profile_complete_for_modules, start_declared_domain_count, profiles_from_bulk, read_organisation_inputs, validate_envelopes  # noqa: E402
 from norway_company_agent.contract import profile_to_contract_envelope  # noqa: E402
-from norway_company_agent.envelope_refresh import read_previous, refresh_envelopes  # noqa: E402
+from norway_company_agent.envelope_refresh import read_previous_with_stats, refresh_envelopes  # noqa: E402
 from norway_company_agent.discovery import choose_search_candidate  # noqa: E402
 from norway_company_agent.domain_solver import discover_website_by_domain_search  # noqa: E402
 from norway_company_agent.evidence import utc_now  # noqa: E402
@@ -289,9 +289,12 @@ def main() -> None:
     errors: list[dict] = []
     output_path = Path(args.output)
     # Refresh baseline: read before anything overwrites the output file.
-    previous_envelopes = read_previous(args.previous or output_path)
-    if previous_envelopes:
-        print(f"[{utc_now()}] Refresh: {len(previous_envelopes)} previous envelopes from {args.previous or output_path}", flush=True)
+    try:
+        previous_envelopes, previous_stats = read_previous_with_stats(args.previous or output_path)
+    except Exception as exc:  # never let the refresh baseline stop a run
+        previous_envelopes, previous_stats = {}, {"error": f"{type(exc).__name__}: {exc}"}
+    if previous_stats.get("rows") or previous_stats.get("error"):
+        print(f"[{utc_now()}] Refresh baseline: {json.dumps(previous_stats)}", flush=True)
 
     import threading
 
@@ -322,7 +325,10 @@ def main() -> None:
                     env = profile_to_contract_envelope(prof, run_id=args.run_id, started_at=started_at, completed_at=completed, terminal_status="completed")
                 final_profiles.append(prof)
                 envs.append(env)
-            refresh_envelopes(envs, previous_envelopes)
+            try:
+                refresh_envelopes(envs, previous_envelopes)
+            except Exception as exc:
+                print(f"Refresh skipped at deadline: {type(exc).__name__}: {exc}", flush=True)
             write_jsonl(output_path, envs)
             write_jsonl(
                 Path(args.profiles_output) if args.profiles_output else output_path.with_suffix(".profiles.jsonl"),
@@ -456,7 +462,10 @@ def main() -> None:
         )
         for prof in ordered_profiles
     ]
-    refresh_stats = refresh_envelopes(envelopes, previous_envelopes)
+    try:
+        refresh_stats = refresh_envelopes(envelopes, previous_envelopes)
+    except Exception as exc:  # per-company failures are already caught; this is a last guard
+        refresh_stats = {"compared": 0, "material_changes": 0, "companies_changed": 0, "failed": len(envelopes), "error": f"{type(exc).__name__}: {exc}"}
     print(f"[{utc_now()}] Refresh: {json.dumps(refresh_stats)}", flush=True)
 
     profiles_output_path = Path(args.profiles_output) if args.profiles_output else output_path.with_suffix(".profiles.jsonl")
@@ -500,7 +509,7 @@ def main() -> None:
         "registry": registry_metadata,
         "operations": operations,
         "validation": {"passed": all(validation.values()), "checks": validation},
-        "refresh": {"previous_envelopes": len(previous_envelopes), **refresh_stats},
+        "refresh": {"baseline": previous_stats, **refresh_stats},
         "errors": errors,
     }
 

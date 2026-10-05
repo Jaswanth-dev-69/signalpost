@@ -325,5 +325,48 @@ class DeclaredDomainCount(unittest.TestCase):
         self.assertIn("disk", status["error"])
 
 
+class RefreshBaselineRobustness(unittest.TestCase):
+    """H2: a bad previous file never crashes a run or drops an envelope."""
+
+    def write(self, text: str) -> str:
+        import tempfile
+        handle = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8")
+        handle.write(text)
+        handle.close()
+        return handle.name
+
+    def current(self, org="923609016"):
+        return envelope(verified_profile(org, "EXAMPLE ASA", "https://ex.no/"))
+
+    def read(self, path):
+        from norway_company_agent.envelope_refresh import read_previous_with_stats
+        return read_previous_with_stats(path)
+
+    def test_missing_and_empty_files(self):
+        self.assertEqual(self.read("/nonexistent/previous.jsonl")[0], {})
+        self.assertEqual(self.read(self.write(""))[1]["rows"], 0)
+
+    def test_truncated_and_corrupt_lines_are_skipped_not_fatal(self):
+        import json
+        good = json.dumps(self.current())
+        previous, stats = self.read(self.write(good + "\n" + good[: len(good) // 2] + "\n{not json\n"))
+        self.assertEqual((len(previous), stats["bad_lines"]), (1, 2))
+
+    def test_v2_envelopes_without_profile_are_counted_not_used(self):
+        import json
+        previous, stats = self.read(self.write(json.dumps({"organisation_number": "923609016", "claims": [], "evidence": []}) + "\n"))
+        self.assertEqual((previous, stats["without_profile"]), ({}, 1))
+
+    def test_other_batch_and_broken_rows_keep_one_envelope_each(self):
+        from norway_company_agent.envelope_refresh import refresh_envelopes
+        envs = [self.current("923609016"), self.current("811413682")]
+        other = {"999999999": self.current("999999999"), "811413682": {"organisation_number": "811413682", "profile": {"organisation_number": "811413682", "evidence": "broken"}, "claims": "broken"}}
+        stats = refresh_envelopes(envs, other)
+        self.assertEqual(len(envs), 2)
+        self.assertEqual(stats["failed"], 1)
+        self.assertIn("error", envs[1]["refresh"])
+        self.assertEqual(envs[0]["refresh"]["previous_run_id"], None)
+
+
 if __name__ == "__main__":
     unittest.main()

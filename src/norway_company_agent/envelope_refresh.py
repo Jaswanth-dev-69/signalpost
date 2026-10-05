@@ -24,20 +24,44 @@ FAILED_STATUSES = {"source_error", "blocked", "failed", "not_fetched"}
 MAX_PRIOR_EVIDENCE = 300
 
 
-def read_previous(path: str | Path | None) -> dict[str, dict[str, Any]]:
-    """Previous envelopes by organisation number; unreadable or kit-less files give nothing."""
-    if not path or not Path(path).exists():
-        return {}
+def read_previous_with_stats(path: str | Path | None) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Previous envelopes by organisation number, read line by line.
+
+    Never raises: a missing, empty, truncated or corrupt file, or rows without the kit `profile`
+    (for example v2 envelopes), only reduce what can be compared. The stats say what was skipped.
+    """
+    stats: dict[str, Any] = {"path": str(path) if path else None, "rows": 0, "usable": 0, "bad_lines": 0, "without_profile": 0, "error": None}
     previous: dict[str, dict[str, Any]] = {}
+    if not path:
+        return previous, stats
     try:
-        for line in Path(path).read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                row = json.loads(line)
-                if isinstance(row, dict) and row.get("organisation_number") and isinstance(row.get("profile"), dict):
-                    previous[row["organisation_number"]] = row
-    except (OSError, ValueError):
-        return {}
-    return previous
+        source = Path(path)
+        if not source.is_file():
+            return previous, stats
+        with source.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                stats["rows"] += 1
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    stats["bad_lines"] += 1
+                    continue
+                if not isinstance(row, dict) or not row.get("organisation_number"):
+                    stats["bad_lines"] += 1
+                elif not isinstance(row.get("profile"), dict):
+                    stats["without_profile"] += 1
+                else:
+                    previous[str(row["organisation_number"])] = row
+    except OSError as exc:
+        stats["error"] = f"{type(exc).__name__}: {exc}"
+    stats["usable"] = len(previous)
+    return previous, stats
+
+
+def read_previous(path: str | Path | None) -> dict[str, dict[str, Any]]:
+    return read_previous_with_stats(path)[0]
 
 
 def _key(value: Any) -> str:
@@ -127,12 +151,20 @@ def refresh_envelope(current: dict[str, Any], previous: dict[str, Any] | None) -
 
 
 def refresh_envelopes(envelopes: list[dict[str, Any]], previous: dict[str, dict[str, Any]]) -> dict[str, int]:
-    stats = {"compared": 0, "material_changes": 0, "companies_changed": 0}
+    """Refresh every envelope in place; a failure for one company is counted, never raised, and
+    leaves that envelope as it was (with `refresh.error`)."""
+    stats = {"compared": 0, "material_changes": 0, "companies_changed": 0, "failed": 0}
     for envelope in envelopes:
         before = previous.get(envelope.get("organisation_number"))
-        refresh_envelope(envelope, before)
+        try:
+            refresh_envelope(envelope, before)
+        except Exception as exc:
+            stats["failed"] += 1
+            envelope["refresh"] = {"previous_run_id": (before or {}).get("run_id"), "material_changes": 0,
+                                   "error": f"{type(exc).__name__}: {str(exc)[:200]}", "prior_evidence": [], "preserved_claims": []}
+            continue
         if before:
             stats["compared"] += 1
-            stats["material_changes"] += len(envelope["changes"])
-            stats["companies_changed"] += bool(envelope["changes"])
+            stats["material_changes"] += len(envelope.get("changes") or [])
+            stats["companies_changed"] += bool(envelope.get("changes"))
     return stats
