@@ -352,3 +352,19 @@ Options that need your decision (not done):
 - `pyproject.toml` adds `[project.scripts]` and a build system. The build backend was a range
   (`hatchling>=1.27,<2`); it is now pinned to `hatchling==1.32.4` (the version uv resolved).
   Runtime dependencies are unchanged.
+
+## H4 Runtime on the final code (done)
+
+- proxy-200, commit 25dba73, private-address check on every site fetch: **259 s** wall (v2 261 s,
+  rev3b 267 s). Exit 0, 200/200 envelopes.
+- Phases: snapshot loaded 15 s; pass 1 (official) 20 s, about 0.10 s per company at 24 workers;
+  shared-domain count done at 35.5 s (20 s, overlapping pass 1, so no wait); pass 2 (web) 110 s, about
+  0.55 s per company at 32 workers. The NAV vacancy index (a fixed ~250 s, in parallel) sets the end
+  of a small run. DNS caching is not needed.
+- H1 check: the same 44 websites are published as in the earlier rev3 run (44/44 identical
+  org→URL). Family coverage is unchanged: website 44, description 41, social 22, news 23, hiring 16.
+- Estimate from the measured per-company times (proxy-200 is website-heavy, so this is
+  conservative): **1,500 companies about 15 + 150 + 825 ≈ 990 s (16.5 min)**, under the 1,500 s
+  hard deadline; NAV completes earlier. At 3,000 companies, pass 1 ends at about 320 s and the web
+  pass stops starting new companies at 1,410 s, so about 1,980 companies get web research. Every
+  company still gets an envelope.
