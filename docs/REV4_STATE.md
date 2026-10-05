@@ -88,3 +88,57 @@ So on proxy-200 any difference is real; on large-60, ±1 company is noise.
 | E6 news cap 10 → 20 (same sources, own article page each) | news facts 163 → **196** (+20%; 7.09 → 8.52 per covered company), companies unchanged | 120 → 137 (+14%, above spread 7) | 251 → **312** (+24%) | 264 s (+1.5% vs E7) | Keep (cost well under +5%) |
 
 Wrong-company hits: none seen in any run (audits on the candidate are below).
+
+## E2 and E3 finished (candidate-only; not implemented, per "no new sources")
+
+- **E2 Wikidata**, under the unchanged strict proof for discovered domains: 58 candidates tested (18
+  from our sets, 40 from the registry-comparable pool). **14 pass, 0 wrong-company.** 5 passes are on a
+  domain other than the registry homepage, and each is the same organisation's current or alternate
+  site printing its own org number (nsf.no for Norsk Sykepleierforbund, bufdir.no for Bufdir, ...). On
+  our 360 companies only 2 would be added. Bulk agreement with registry homepages is 88.8%, so
+  Wikidata cannot serve as an anchor.
+- **E3 NAV employer homepage** (`ad_content.employer.homepage`, already read by v3 and unused).
+  Employers are **subunits**, so they were mapped to the parent with the BRREG subunit API. Against the
+  parent's registry homepage: **81.8% agreement on 132 comparable** (the field is free text:
+  teamtailor.com, google.com, staffing agencies, kirken.no, politiet.no). Candidate-only. 168/300
+  sampled employers point beyond the registry homepage. Of 40 such candidates (ATS, generic and shared
+  hosts excluded), 37 load and **15 pass the strict proof, 0 wrong-company** (synsam.no, inn.no,
+  musti.no, haugalandmuseet.no, ...). This is the most promising lead for raising website coverage
+  without a new source: it uses data we already read, with the gate unchanged. Not implemented now.
+
+## Summary (stopped here; v4 not packaged)
+
+Candidate branch `rev4-candidate` (code = commit b454207, all kept changes; v3 = 6074351 untouched).
+
+| Experiment | proxy-200 before → after (companies; facts) | Noise floor (proxy / large) | Wrong-company | Wall vs v3 | Verdict |
+|---|---|---|---|---|---|
+| E5 careers depth 2, sitemap, probes; news probes | hiring 16 → 17 (with E5b); sample-100 hiring 18 → 20 | 0 / ±1 | 0 | +0–3% | **Kept** |
+| E5b careers before news | removes budget-cut careers losses | 0 / ±1 | 0 | 0% | **Kept** (robustness) |
+| E7 406 fallback, homepage retry, 403 → `blocked` | no coverage change; 3 large companies now honestly `blocked` | 0 / ±1 | 0 | 0% | **Kept** (robustness) |
+| E6 news cap 20 | news facts 164 → 196 (7.13 → 8.52 per covered company); large-60 +14%, sample-100 +24% | facts 0 / ±7 | 0 | +1.5% | **Kept** |
+| E4 ATS/newsroom links | 0 companies gained | — | — | — | Not implemented |
+| E7 JS-shell sitemap liveness | 0 qualifying sites | — | — | — | Not implemented |
+| Shared-domain narrower rule | decides 3 sample cases (+Elopak), below 30 | — | — | — | Not implemented → Q14 |
+| E1 OSM | 60.7% agreement, +2 candidates, unclear ODbL use | — | — | — | Skipped |
+| E2 Wikidata | 88.8% agreement; 14/58 pass strict proof, 0 wrong; +2 on our 360 | — | 0 | — | Candidate-only, not implemented |
+| E3 NAV employer homepage | 81.8% agreement; 15/37 candidates pass strict proof, 0 wrong | — | 0 | — | Candidate-only, not implemented (best lead) |
+
+Candidate checks (proxy-200, run twice into one output): **263 s** both runs (v3 average 261 s, so
++0.8%); 139 unit tests pass; schema 0 errors; determinism 173/200 identical (the rest are page-byte
+hashes), 0 duplicates, **0 change events**; refresh 200 compared, 0 material changes;
+precision_audit **100/100, 0 wrong-company**; evidence_audit 164/164 URLs load, 99.4% spans verbatim.
+Output shape unchanged (no new fields, same claim names, same profile and `external`).
+
+Net effect vs v3: same company coverage in every family except hiring (+1 on proxy-200, +2 on
+sample-100), and about +20% dated-news facts. Expected score impact is small: hiring company recall
+up about 1 point of that family, news fact recall up within news's 30% fact weight.
+
+Questions still waiting on Builderr (`docs/QUESTIONS_FOR_BUILDERR.md`): Q1 which command produced our
+scored run; Q2/Q3 claim names and envelope paths read for news, hiring and social; Q4 value
+normalization; Q5 which families count toward Recall; Q7 which evidence checks cost points; Q10/Q11
+time budget and whether `--bulk` is supplied; Q13 whether `external.handles` is read and where; Q14
+how shared or group-site websites are scored (Elopak) and whether a `group_site` label is acceptable;
+plus whether a search-API key can be provided.
+
+Next step, if approved: E3 as a discovery candidate source (NAV employer homepage → unchanged strict
+proof), measured with the same keep rule. It uses data v3 already reads; no new source.
