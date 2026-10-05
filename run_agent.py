@@ -72,7 +72,7 @@ def enrich_company_profile(
 def registry_website_alternates(declared: str, record: dict[str, Any]) -> list[str]:
     """Retry variants for a registry homepage that failed to load (DNS, TLS, timeout, 5xx)."""
     note = str(record.get("note") or "")
-    if record.get("status") == "available" or "robots.txt" in note or "byte limit" in note:
+    if record.get("status") == "available" or "robots.txt" in note or "byte limit" in note or "refused the request" in note:
         return []
     if record.get("status") not in {"blocked", "source_error", "not_found"}:
         return []
@@ -161,7 +161,7 @@ def enrich_web(
 
         # Tier B1: Try registry-listed website if present
         if reg_website:
-            website_record, first_metrics = fetch_website(reg_website, timeout=timeout)
+            website_record, first_metrics = fetch_website(reg_website, timeout=timeout, retries=1)
             add_metrics(first_metrics)
             for alternate in registry_website_alternates(reg_website, website_record):
                 # Same registered domain only: www/non-www and http/https variants of the declared URL.

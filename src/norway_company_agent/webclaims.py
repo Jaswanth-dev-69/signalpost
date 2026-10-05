@@ -206,6 +206,11 @@ class SiteFetcher:
                     self.cache.pop(url, None)
                     self.budget[family] = self.budget.get(family, 1) - 1
                     return self.get(url, family, accept=accept)
+            if exc.code == 406 and accept != "*/*":
+                # The server rejects our Accept header; ask once for any representation.
+                self.cache.pop(url, None)
+                self.budget[family] = self.budget.get(family, 1) - 1
+                return self.get(url, family, accept="*/*")
             self.errors.append({"url": url, "error": f"HTTP {exc.code}"})
         except Exception as exc:  # network, TLS, decode
             self.errors.append({"url": url, "error": f"{type(exc).__name__}: {str(exc)[:100]}"})

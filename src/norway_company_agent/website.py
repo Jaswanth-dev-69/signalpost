@@ -345,7 +345,31 @@ def _extraction_state(text: str, soup: BeautifulSoup) -> str:
     return "js_fallback_candidate" if len(text.strip()) < 100 and len(soup.select("script[src]")) >= 2 else "static_complete"
 
 
-def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_000_000) -> tuple[dict[str, Any], dict[str, Any]]:
+HTML_ACCEPT = "text/html,application/xhtml+xml"
+RETRYABLE = re.compile(r"^HTTP (429|500|502|503|504)\b|timed out|Connection reset|Remote end closed", re.I)
+
+
+def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_000_000, retries: int = 0) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Fetch a homepage. A 406 is retried once with `Accept: */*`; with `retries`, a timeout, 429 or
+    5xx is retried after a short pause. 401/403 mean the site refused the request: `blocked`."""
+    record, metrics = _fetch_website_once(url, timeout=timeout, max_bytes=max_bytes)
+    attempts = [(record, metrics)]
+    note = str(record.get("note") or "")
+    if record.get("status") == "source_error" and note.startswith("HTTP 406"):
+        attempts.append(_fetch_website_once(url, timeout=timeout, max_bytes=max_bytes, accept="*/*"))
+    for _ in range(retries):
+        record = attempts[-1][0]
+        if record.get("status") != "source_error" or not RETRYABLE.search(str(record.get("note") or "")):
+            break
+        time.sleep(1.5)
+        attempts.append(_fetch_website_once(url, timeout=timeout, max_bytes=max_bytes))
+    record = attempts[-1][0]
+    merged = {"requests": sum(m["requests"] for _, m in attempts), "bytes": sum(m["bytes"] for _, m in attempts),
+              "latencies_ms": [lat for _, m in attempts for lat in m["latencies_ms"]]}
+    return record, merged
+
+
+def _fetch_website_once(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_000_000, accept: str = HTML_ACCEPT) -> tuple[dict[str, Any], dict[str, Any]]:
     supplied_url = str(url or "").strip()
     supplied_scheme = bool(re.match(r"^https?://", supplied_url, re.I))
     normalized = normalize_homepage(url)
@@ -358,7 +382,7 @@ def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_
     if not _robots_allowed(normalized, timeout):
         return evidence("website", "blocked", "registry_linked_company_website", normalized, note="robots.txt disallows this user agent"), {"requests": 1, "bytes": 0, "latencies_ms": []}
     started = time.monotonic()
-    request = urllib.request.Request(normalized, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"})
+    request = urllib.request.Request(normalized, headers={"User-Agent": USER_AGENT, "Accept": accept})
     try:
         with SAFE_OPENER.open(request, timeout=timeout) as response:
             content_type = response.headers.get("content-type", "")
@@ -452,12 +476,13 @@ def fetch_website(url: str | None, *, timeout: float = 15.0, max_bytes: int = 2_
         return evidence("website", "available", "registry_linked_company_website", final_url, value=value, note="Company-controlled claim layer; not an official registry fact", content_sha256=value["content_sha256"], retrieved_at=fetched_at), {"requests": requests, "bytes": bytes_received, "latencies_ms": page_latencies}
     except urllib.error.HTTPError as exc:
         elapsed = int((time.monotonic() - started) * 1000)
-        status = "not_found" if exc.code in {404, 410} else "source_error"
-        return evidence("website", status, "registry_linked_company_website", normalized, note=f"HTTP {exc.code}"), {"requests": 2, "bytes": 0, "latencies_ms": [elapsed]}
+        status = "not_found" if exc.code in {404, 410} else "blocked" if exc.code in {401, 403} else "source_error"
+        note = f"HTTP {exc.code} (the site refused the request)" if status == "blocked" else f"HTTP {exc.code}"
+        return evidence("website", status, "registry_linked_company_website", normalized, note=note), {"requests": 2, "bytes": 0, "latencies_ms": [elapsed]}
     except urllib.error.URLError as exc:
         if not supplied_scheme and normalized.startswith("https://"):
             first_elapsed = int((time.monotonic() - started) * 1000)
-            record, metrics = fetch_website("http://" + supplied_url, timeout=timeout, max_bytes=max_bytes)
+            record, metrics = _fetch_website_once("http://" + supplied_url, timeout=timeout, max_bytes=max_bytes, accept=accept)
             metrics["requests"] += 2
             metrics["latencies_ms"].insert(0, first_elapsed)
             return record, metrics
