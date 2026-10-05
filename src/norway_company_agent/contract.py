@@ -161,6 +161,30 @@ LIVE_JSON_KEYS = {
 }
 
 
+def _csv_cell(value: Any) -> str:
+    return '"' + str(value if value is not None else "").replace('"', '""') + '"'
+
+
+def _bulk_span(raw: Any, column: str) -> str | None:
+    """Two adjacent quoted cells of the bulk CSV row, exactly as the file writes them: the cell
+    before the field and the field itself (for 'navn' that is the organisation number and name)."""
+    if not isinstance(raw, dict) or column not in raw:
+        return None
+    keys = list(raw)
+    index = keys.index(column)
+    window = keys[index - 1:index + 1] if index > 0 else keys[:2]
+    return ",".join(_csv_cell(raw[key]) for key in window)
+
+
+def _role_holder_literal(role: dict[str, Any]) -> str | None:
+    """One verbatim fragment of the roles API JSON naming the role holder."""
+    if role.get("last_name") and role.get("first_name"):
+        return f'"etternavn":{json.dumps(role["last_name"], ensure_ascii=False)},"fornavn":{json.dumps(role["first_name"], ensure_ascii=False)}'
+    if role.get("organisation_number"):
+        return f'"organisasjonsnummer":"{role["organisation_number"]}"'
+    return None
+
+
 def _role_literal(role: dict[str, Any]) -> str:
     """Literal fragments of the roles API JSON: role description plus the holder's name fields."""
     parts = [f'"beskrivelse":{json.dumps(role.get("role"), ensure_ascii=False)}'] if role.get("role") else []
@@ -317,7 +341,9 @@ def profile_to_contract_envelope(
             )
             return evidence_from(live, live_span, f"registry_{field}", "official_registry_live")
         if bulk_ok:
-            return evidence_from(bulk, span, f"registry_{field}", "official_registry_bulk")
+            raw = bulk.get("value") or {}
+            bulk_span = _bulk_span(raw, REGISTRY_KEYS.get(field, field)) or _bulk_span(raw, "navn") or span
+            return evidence_from(bulk, bulk_span, f"registry_{field}", "official_registry_bulk")
         return None
 
     # Evidence that identifies the entity, reused for fields whose own source is unavailable.
@@ -357,7 +383,8 @@ def profile_to_contract_envelope(
         form_ev = registry_evidence("legal_form", profile_values.get("legal_form"))
         filing_ev = None
         if bulk_ok and acc_value.get("latest_submitted_accounts"):
-            filing_ev = evidence_from(bulk, f"{org} sisteInnsendteAarsregnskap: {acc_value.get('latest_submitted_accounts')}", "registry_latest_accounts", "official_registry_bulk")
+            filing_span = _bulk_span(bulk.get("value"), "sisteInnsendteAarsregnskap") or f"{org} sisteInnsendteAarsregnskap: {acc_value.get('latest_submitted_accounts')}"
+            filing_ev = evidence_from(bulk, filing_span, "registry_latest_accounts", "official_registry_bulk")
         add_claim("accounting_obligation", acc_value, acc_ob.get("status", "available") if acc_ob.get("status") != "not_found" else "not_available", 1.0, [filing_ev, form_ev])
     else:
         add_claim("accounting_obligation", None, "failed" if not absence_ev or live.get("status") != "not_found" else "not_available", 0.5, [entity_ev])
@@ -368,16 +395,24 @@ def profile_to_contract_envelope(
     fin_records = (fin_rec.get("value") or {}).get("records") or [] if fin_status == "available" else []
     if fin_status == "available" and fin_records:
         latest = fin_records[0]
-        period = _period_text(latest.get("period"))
+        period = latest.get("period")
+        # Each span is one verbatim fragment of the API's compact JSON: the period object, and
+        # for every figure its own key and value; a claim cites both.
+        period_span = f'"regnskapsperiode":{json.dumps(period, ensure_ascii=False, separators=(",", ":"))}' if isinstance(period, dict) else _period_literal(period)
+        period_ev = evidence_from(fin_rec, period_span, "financials_period", "official_annual_accounts")
+        if period_ev and isinstance(period, dict):
+            evidence_map[period_ev]["effective_at"] = period.get("tilDato")
         for field, key, label in FINANCIAL_FIELDS:
             value = latest.get(key)
-            ev = evidence_from(fin_rec, f"{_period_literal(latest.get('period'))} | " + (f'"{label}":{value:.2f}' if isinstance(value, (int, float)) else f"{label}: not reported"), f"financials_{field}", "official_annual_accounts")
-            add_claim(field, value, "available" if value is not None else "not_available", 1.0, [ev])
-        ev = evidence_from(fin_rec, _period_literal(latest.get("period")), "financials_period", "official_annual_accounts")
-        add_claim("reporting_period", latest.get("period"), "available" if latest.get("period") is not None else "not_available", 1.0, [ev])
+            ev = evidence_from(fin_rec, f'"{label}":{value:.2f}', f"financials_{field}", "official_annual_accounts") if isinstance(value, (int, float)) else None
+            if ev and isinstance(period, dict):
+                evidence_map[ev]["effective_at"] = period.get("tilDato")
+            claim = add_claim(field, value, "available" if value is not None else "not_available", 1.0, [ev, period_ev])
+            claim["reporting_period"] = period
+        add_claim("reporting_period", period, "available" if period is not None else "not_available", 1.0, [period_ev])
     else:
         if fin_status == "available":
-            state, ev = "not_available", evidence_from(fin_rec, f"regnskap {org}: no annual accounts published", "financials_empty", "official_annual_accounts")
+            state, ev = "not_available", evidence_from(fin_rec, "[]", "financials_empty", "official_annual_accounts")
         elif fin_status == "not_found":
             state, ev = "not_available", evidence_from(fin_rec, f"regnskap {org}: {fin_rec.get('note') or 'HTTP 404'} (no annual accounts registered)", "financials_absent", "official_annual_accounts")
         else:
@@ -392,7 +427,7 @@ def profile_to_contract_envelope(
     if roles_rec.get("status") == "available":
         role_items = (roles_rec.get("value") or {}).get("roles") or []
         active_roles = [r for r in role_items if not r.get("inactive")]
-        span = " | ".join(_role_literal(r) for r in active_roles[:4]) or f"roller {org}: no active role holders"
+        span = next((lit for lit in (_role_holder_literal(r) for r in active_roles) if lit), None) or '"rollegrupper":[]'
         ev = evidence_from(roles_rec, span, "roles", "official_roles")
         add_claim("registered_roles", active_roles, "available" if active_roles else "not_available", 1.0, [ev])
     elif roles_rec.get("status") == "not_found":
@@ -405,7 +440,7 @@ def profile_to_contract_envelope(
     loc_rec = records.get("locations") or {}
     if loc_rec.get("status") == "available":
         subunits = (loc_rec.get("value") or {}).get("locations") or []
-        span = "; ".join(f"{s.get('organisation_number')} {s.get('name')}" for s in subunits[:12]) or f"underenheter overordnetEnhet={org}: totalElements 0"
+        span = f'"organisasjonsnummer":"{subunits[0].get("organisation_number")}"' if subunits else '"totalElements":0'
         ev = evidence_from(loc_rec, span, "locations", "official_subunits")
         add_claim("registered_subunits", subunits, "available" if subunits else "not_available", 1.0, [ev])
     elif loc_rec.get("status") == "not_found":

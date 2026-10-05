@@ -30,7 +30,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from norway_company_agent.batch import profile_complete_for_modules, profiles_from_bulk, read_organisation_inputs, validate_envelopes  # noqa: E402
+from norway_company_agent.batch import declared_domain_counts, profile_complete_for_modules, profiles_from_bulk, read_organisation_inputs, validate_envelopes  # noqa: E402
 from norway_company_agent.contract import profile_to_contract_envelope  # noqa: E402
 from norway_company_agent.discovery import choose_search_candidate  # noqa: E402
 from norway_company_agent.domain_solver import discover_website_by_domain_search  # noqa: E402
@@ -40,7 +40,7 @@ from norway_company_agent.http import fetch_json  # noqa: E402
 from norway_company_agent.official import accounting_obligation_assessment, fetch_official_modules, fetch_subunit_record  # noqa: E402
 from norway_company_agent.synthesis import generate_company_synthesis  # noqa: E402
 from norway_company_agent.website import fetch_website, strip_private_fields  # noqa: E402
-from norway_company_agent.webclaims import crawl_web_claims  # noqa: E402
+from norway_company_agent.webclaims import crawl_web_claims, registered_domain  # noqa: E402
 from norway_company_agent.nav_jobs import NavJobIndex, attach_postings  # noqa: E402
 from scripts.build_prototype import build as build_viewer_html  # noqa: E402
 
@@ -339,6 +339,10 @@ def main() -> None:
     bulk_path = ensure_bulk_snapshot(args.bulk)
     profiles, registry_metadata = profiles_from_bulk(bulk_path, orgs)
     base_profiles.update({p_["organisation_number"]: p_ for p_ in profiles})
+    # Snapshot-wide homepage counts (about 15 s of CPU), computed while pass 1 waits on the network.
+    declared_counts: dict[str, int] = {}
+    counts_thread = threading.Thread(target=lambda: declared_counts.update(declared_domain_counts(bulk_path)), daemon=True)
+    counts_thread.start()
     print(f"[{utc_now()}] Registry snapshot loaded at {elapsed():.1f}s.", flush=True)
 
     def record_errors(prof: dict, exc: Exception, stage: str) -> None:
@@ -358,6 +362,15 @@ def main() -> None:
             state[prof["organisation_number"]] = prof
             if index % 200 == 0 or index == expected_count:
                 print(f"[{utc_now()}] Pass 1 (official): {index}/{expected_count}, elapsed={elapsed():.1f}s", flush=True)
+
+    counts_thread.join(timeout=max(1.0, min(120.0, args.hard_deadline - args.web_reserve - elapsed())))
+    if declared_counts:
+        for prof in state.values():
+            declared = str(prof.get("website") or "").strip()
+            if declared:
+                domain = registered_domain(declared if re.match(r"^https?://", declared, re.I) else "https://" + declared).casefold()
+                prof["homepage_domain_registry_entities"] = declared_counts.get(domain, 0)
+    print(f"[{utc_now()}] Declared-domain counts: {len(declared_counts)} domains, elapsed={elapsed():.1f}s", flush=True)
 
     # Pass 2: web layers with a per-company budget; stop starting web work near the deadline.
     web_cutoff = args.hard_deadline - args.web_reserve

@@ -125,6 +125,37 @@ def profiles_from_bulk(path: str | Path, organisation_numbers: Iterable[str]) ->
     }
 
 
+def declared_domain_counts(path: str | Path) -> dict[str, int]:
+    """How many registry entities declare each registered domain as their homepage (hjemmeside)."""
+    import csv
+    import gzip
+    import re
+    from collections import Counter
+
+    from .webclaims import registered_domain
+
+    counts: Counter[str] = Counter()
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8-sig", newline="") as handle:
+        sample = handle.read(8192)
+        handle.seek(0)
+        reader = csv.reader(handle, csv.Sniffer().sniff(sample, delimiters=";,\t"))
+        header = next(reader)
+        column = header.index("hjemmeside") if "hjemmeside" in header else None
+        if column is None:
+            return {}
+        seen: dict[str, str] = {}
+        for row in reader:
+            value = row[column].strip() if len(row) > column else ""
+            if not value:
+                continue
+            if value not in seen:
+                seen[value] = registered_domain(value if re.match(r"^https?://", value, re.I) else "https://" + value).casefold()
+            if seen[value]:
+                counts[seen[value]] += 1
+    return dict(counts)
+
+
 def evidence_terminal_state(record: dict[str, Any] | None) -> str:
     if not record:
         return "submission_error"

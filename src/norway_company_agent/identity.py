@@ -275,6 +275,14 @@ def registry_declared_assessment(profile: dict[str, Any], website: dict[str, Any
         reasons.append("strict gate flagged parked page or sports-club mismatch")
     if other_orgs:
         reasons.append(f"site names a different organisation number: {', '.join(other_orgs[:3])}")
+    # A domain several entities declare is a group, brand, chain or provider site: label it, never
+    # collapse it onto one of them. Without the snapshot-wide count the rule is not applied.
+    declarants = profile.get("homepage_domain_registry_entities")
+    shared = isinstance(declarants, int) and declarants >= 2
+    if declarants is None:
+        reasons.append("shared-domain check unavailable")
+    elif shared:
+        reasons.append(f"{declarants} registry entities declare this domain (shared group, brand or provider site)")
     if content < 40:
         reasons.append("page has no substantive content")
     return {
@@ -283,6 +291,8 @@ def registry_declared_assessment(profile: dict[str, Any], website: dict[str, Any
         "score": 0.75 if not reasons else strict.get("score", 0.0),
         "method": "registry_declared_domain",
         "declared_domain": declared_domain,
+        "declaring_entities": declarants,
+        "relationship": "shared_group_brand_or_provider_site" if shared else None,
         "rejection_reasons": reasons,
         "strict_assessment": strict,
     }

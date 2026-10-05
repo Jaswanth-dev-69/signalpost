@@ -187,5 +187,28 @@ class SocialGate(unittest.TestCase):
     def test_short_domain_label_is_not_enough(self):
         self.assertEqual(self.links("NORDIC SUPPLY PARTNER AS", "nsp.no", ["https://instagram.com/nspnorge"]), [])
 
+
+class SharedDeclaredDomain(unittest.TestCase):
+    def assessment(self, declarants):
+        from norway_company_agent.identity import registry_declared_assessment
+        profile = {"organisation_number": "999999999", "name": "EXAMPLE FUND", "website": "www.group.no"}
+        if declarants is not None:
+            profile["homepage_domain_registry_entities"] = declarants
+        website = {"status": "available", "source_url": "https://www.group.no/", "value": {
+            "final_url": "https://www.group.no/", "title": "Group", "main_text_excerpt": "x" * 200}}
+        return registry_declared_assessment(profile, website)
+
+    def test_sole_declarant_is_accepted(self):
+        self.assertTrue(self.assessment(1)["publishable"])
+
+    def test_domain_declared_by_several_entities_is_labelled_not_published(self):
+        result = self.assessment(13)
+        self.assertFalse(result["publishable"])
+        self.assertEqual(result["relationship"], "shared_group_brand_or_provider_site")
+
+    def test_unknown_count_is_not_published(self):
+        self.assertFalse(self.assessment(None)["publishable"])
+
+
 if __name__ == "__main__":
     unittest.main()
