@@ -130,7 +130,7 @@ class Normalization(unittest.TestCase):
     def test_published_at_keeps_the_source_timestamp(self):
         self.assertEqual(published_at("2025-09-22T20:00:00+02:00", "2025-09-22"), "2025-09-22T20:00:00+02:00")
         self.assertEqual(published_at("Mon, 22 Sep 2025 20:00:00 +0200", "2025-09-22"), "2025-09-22T20:00:00+02:00")
-        self.assertEqual(published_at("2025-09-22T18:00:00Z", "2025-09-22"), "2025-09-22T18:00:00+00:00")
+        self.assertEqual(published_at("2025-09-22T18:00:00.069Z", "2025-09-22"), "2025-09-22T18:00:00.069Z")
         self.assertEqual(published_at("22. september 2025", "2025-09-22"), "2025-09-22")
         self.assertEqual(published_at("2025-09-23T01:00:00+02:00", "2025-09-22"), "2025-09-22")
 

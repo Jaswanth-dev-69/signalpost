@@ -26,6 +26,8 @@ import tldextract
 USER_AGENT = "builderr-signalpost-poc/0.1 (+https://builderr.ai)"
 FAMILY_FETCH_CAP = 6
 MAX_NEWS_ITEMS = 10
+# Article pages are fetched so each dated item cites its own page; they have their own budget.
+FETCH_CAPS = {"news_article": MAX_NEWS_ITEMS}
 MAX_JOB_POSTINGS = 25
 PER_HOST_INTERVAL_S = 0.35
 
@@ -148,7 +150,7 @@ class SiteFetcher:
         url = urllib.parse.urldefrag(url)[0]
         if url in self.cache:
             return self.cache[url]
-        if self.budget.get(family, 0) >= FAMILY_FETCH_CAP:
+        if self.budget.get(family, 0) >= FETCH_CAPS.get(family, FAMILY_FETCH_CAP):
             return None
         if self.deadline is not None and time.monotonic() > self.deadline:
             return None
@@ -237,10 +239,11 @@ def published_at(raw: str | None, iso_date: str) -> str:
     source states only a date. Builderr keys dated news as "title (timestamp)"."""
     text = str(raw or "").strip()
     if re.match(r"20\d{2}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}", text):
+        # ISO timestamps are kept exactly as the page states them (Builderr's key is that string).
         try:
             value = datetime.fromisoformat(text.replace(" ", "T", 1))
             if value.date().isoformat() == iso_date:
-                return value.isoformat()
+                return text
         except ValueError:
             pass
     elif re.search(r"\d{1,2}:\d{2}", text) and not re.match(r"20\d{2}-", text):
@@ -355,6 +358,45 @@ def _title(soup: BeautifulSoup) -> str:
     return " ".join((soup.title.get_text(" ", strip=True) if soup.title else "").split())[:300]
 
 
+def verbatim_window(text: str, parts: list[str], limit: int = 480) -> str | None:
+    """Shortest contiguous stretch of ``text`` containing every part (case-insensitive), widened to
+    word boundaries. ``text`` must already be whitespace-normalized page text."""
+    spans = []
+    folded = text.casefold()
+    for part in parts:
+        part = " ".join(str(part or "").split())
+        index = folded.find(part.casefold()) if part else -1
+        if index < 0:
+            return None
+        spans.append((index, index + len(part)))
+    start, end = min(a for a, _ in spans), max(b for _, b in spans)
+    start = text.rfind(" ", 0, start) + 1 if start > 0 and text[start - 1] != " " else start
+    stop = text.find(" ", end)
+    window = text[start:stop if stop != -1 else len(text)].strip()
+    return window if 0 < len(window) <= limit else None
+
+
+def article_item(page: dict[str, Any], soup: BeautifulSoup) -> dict[str, Any] | None:
+    """A dated news item read from the article's own page: its heading and its own publication date."""
+    found = article_date(soup, page["url"])
+    title = _title(soup)
+    if not found or not title:
+        return None
+    return {
+        "title": title,
+        "url": page["url"],
+        "published_date": found[0],
+        "published_at": published_at(found[1], found[0]),
+        "date_source": found[2],
+        "source_page": page["url"],
+        "content_sha256": page["content_sha256"],
+        "retrieved_at": page["retrieved_at"],
+        "claim_span": title,
+        "date_span": found[1],
+        "extraction_method": f"article_page:{found[2]}",
+    }
+
+
 def _soup(page: dict[str, Any]) -> BeautifulSoup:
     return BeautifulSoup(page["raw"].decode("utf-8", errors="replace"), "lxml")
 
@@ -452,7 +494,9 @@ def parse_feed(page: dict[str, Any], domain: str) -> list[dict[str, Any]]:
             "source_page": page["url"],
             "content_sha256": page["content_sha256"],
             "retrieved_at": page["retrieved_at"],
-            "claim_span": f"{' '.join(title.split())[:200]} | {raw_date}",
+            "claim_span": " ".join(title.split())[:300],
+            "date_span": raw_date,
+            "extraction_method": f"feed:{method}",
         })
     return items
 
@@ -484,6 +528,9 @@ def _listing_inline_items(listing: dict[str, Any], soup: BeautifulSoup, domain: 
         title = " ".join((heading.get_text(" ", strip=True) if heading else anchor.get_text(" ", strip=True)).split())[:300]
         if len(title) < 4:
             continue
+        container_text = " ".join(container.get_text(" ", strip=True).split())
+        visible_date = found[1] if found[2] == "listing_text_date" else (time_node.get_text(" ", strip=True) if time_node is not None else "")
+        window = verbatim_window(container_text, [title, visible_date]) if visible_date else None
         items[url] = {
             "title": title,
             "url": url,
@@ -493,7 +540,9 @@ def _listing_inline_items(listing: dict[str, Any], soup: BeautifulSoup, domain: 
             "source_page": listing["url"],
             "content_sha256": listing["content_sha256"],
             "retrieved_at": listing["retrieved_at"],
-            "claim_span": f"{title[:200]} | {found[1]}",
+            "claim_span": window or title,
+            "date_span": None if window else found[1],
+            "extraction_method": f"news_listing:{found[2]}",
         }
     return list(items.values())
 
@@ -516,7 +565,7 @@ def _jsonld_article_items(page: dict[str, Any], soup: BeautifulSoup, domain: str
             "title": title, "url": url, "published_date": published, "published_at": published_at(node.get("datePublished"), published),
             "date_source": "jsonld_list_datePublished",
             "source_page": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
-            "claim_span": f"{title[:200]} | {node.get('datePublished')}",
+            "claim_span": title, "date_span": str(node.get("datePublished")), "extraction_method": "news_listing:jsonld_datePublished",
         })
     return items
 
@@ -541,7 +590,7 @@ def _wordpress_posts(fetcher: SiteFetcher, home: dict[str, Any], domain: str) ->
                 "title": title, "url": link, "published_date": published, "published_at": published_at(post.get("date"), published),
                 "date_source": "wordpress_rest_date",
                 "source_page": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
-                "claim_span": f"{title[:200]} | {post.get('date')}",
+                "claim_span": title, "date_span": str(post.get("date")), "extraction_method": "wordpress_rest:date",
             })
     return items
 
@@ -580,7 +629,7 @@ def _sitemap_article_urls(fetcher: SiteFetcher, home_url: str) -> tuple[list[dic
                 "title": " ".join(title.split())[:300], "url": loc, "published_date": parse_iso(pub), "published_at": published_at(pub, parse_iso(pub)),
                 "date_source": "news_sitemap_publication_date", "source_page": page["url"],
                 "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
-                "claim_span": f"{' '.join(title.split())[:200]} | {pub.strip()}",
+                "claim_span": " ".join(title.split())[:300], "date_span": pub.strip(), "extraction_method": "news_sitemap:publication_date",
             })
         elif loc and is_news_article(loc):
             urls.append(loc)
@@ -678,35 +727,26 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
             continue
         if not _is_html(page):
             continue
-        soup = _soup(page)
-        found = article_date(soup, page["url"])
-        title = _title(soup)
-        if not found or not title:
-            continue
-        items[url] = {
-            "title": title,
-            "url": page["url"],
-            "published_date": found[0],
-            "published_at": published_at(found[1], found[0]),
-            "date_source": found[2],
-            "source_page": page["url"],
-            "content_sha256": page["content_sha256"],
-            "retrieved_at": page["retrieved_at"],
-            "claim_span": f"{title[:200]} | {found[1]}",
-        }
+        item = article_item(page, _soup(page))
+        if item:
+            items[url] = item
 
+    # Each published item should cite its own article page ("the exact public page"); items seen
+    # on a listing, feed or sitemap are re-read from the article when it can be fetched and dated.
     ordered = sorted(items.values(), key=lambda item: item["published_date"], reverse=True)[:MAX_NEWS_ITEMS]
-    return {"items": ordered, "checked_pages": checked}
+    upgraded = []
+    for item in ordered:
+        if item["source_page"] != item["url"]:
+            page = fetcher.get(item["url"], "news_article")
+            article = article_item(page, _soup(page)) if _is_html(page) else None
+            if article and article["url"] not in {i["url"] for i in upgraded}:
+                item = article
+        upgraded.append(item)
+    upgraded.sort(key=lambda item: item["published_date"], reverse=True)
+    return {"items": upgraded, "checked_pages": checked}
 
 
 # ---------------------------------------------------------------- jobs
-
-def _word_window(text: str, start: int, end: int, width: int = 60) -> str:
-    """Text around a match, cut at word boundaries so the quote does not start mid-word."""
-    left = text.rfind(" ", 0, max(0, start - width)) + 1 if start > width else 0
-    right = text.find(" ", min(len(text), end + width))
-    return text[left:right if right != -1 else len(text)].strip()
-
 
 def _page_ref(page: dict[str, Any]) -> dict[str, Any]:
     return {"url": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"]}
@@ -755,7 +795,8 @@ def _jobposting_items(page: dict[str, Any], soup: BeautifulSoup) -> list[dict[st
             "source_page": page["url"],
             "content_sha256": page["content_sha256"],
             "retrieved_at": page["retrieved_at"],
-            "claim_span": f"JobPosting title: {title}" + (f" | datePosted: {node.get('datePosted')}" if posted else ""),
+            "claim_span": title,
+            "extraction_method": "jsonld_jobposting",
         })
     return postings
 
@@ -781,7 +822,8 @@ def _platform_links(page: dict[str, Any], soup: BeautifulSoup) -> list[dict[str,
             "source_page": page["url"],
             "content_sha256": page["content_sha256"],
             "retrieved_at": page["retrieved_at"],
-            "claim_span": f"{text[:200]} | {href[:250]}",
+            "claim_span": text,
+            "extraction_method": "job_platform_link",
         })
     return postings
 
@@ -852,7 +894,8 @@ def discover_jobs(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
                     "source_page": page["url"],
                     "content_sha256": page["content_sha256"],
                     "retrieved_at": page["retrieved_at"],
-                    "claim_span": f"{title[:200]} | {_word_window(text, marker.start(), marker.end())}",
+                    "claim_span": title,
+                    "extraction_method": "careers_subpage_apply_marker",
                 })
         text = " ".join(soup.get_text(" ", strip=True).split())
         no_openings = NO_OPENINGS.search(text)

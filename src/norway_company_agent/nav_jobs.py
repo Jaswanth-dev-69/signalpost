@@ -193,7 +193,9 @@ class NavJobIndex:
             "entry_url": ENTRY_URL.format(uuid=uuid),
             "entry_sha256": hashlib.sha256(raw).hexdigest(),
             "entry_retrieved_at": _utc_now(),
-            "entry_span": (literal.group(0).decode() if literal else f'"orgnr":"{orgnr}"') + f" | {title[:200]}",
+            # Verbatim fragments of the ad's JSON: the employer literal and the title.
+            "entry_span": literal.group(0).decode() if literal else f'"orgnr":"{orgnr}"',
+            "entry_title_span": title[:200],
         }
         with self._lock:
             self.by_orgnr.setdefault(orgnr, []).append(item)
@@ -229,7 +231,8 @@ def attach_postings(profile: dict[str, Any], index: NavJobIndex, timeout: float 
                     "url": item["url"],
                     "content_sha256": hashlib.sha256(raw).hexdigest(),
                     "retrieved_at": retrieved_at,
-                    "claim_span": f"{item['title'][:200]} | {literal.group(0).decode()}",
+                    "claim_span": " ".join(item["title"][:200].split()),
+                    "orgnr_span": literal.group(0).decode(),
                 }
         except Exception:
             page_evidence = None

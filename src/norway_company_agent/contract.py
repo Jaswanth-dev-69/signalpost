@@ -36,6 +36,28 @@ def news_value(title: str, stamp: str) -> str:
     return f"{' '.join(str(title).split())} ({stamp})"
 
 
+# Source policy: every claim records its extraction method. Evidence keys map to the method used.
+EXTRACTION_METHODS = (
+    ("registry_absent", "registry_lookup_not_found"),
+    ("registry_", "registry_record_field"),
+    ("financials", "annual_accounts_record"),
+    ("roles", "roles_record"),
+    ("locations", "subunits_record"),
+    ("website_identity", "identity_page_text"),
+    ("website_quarantined", "homepage_title"),
+    ("website", "homepage_text"),
+    ("description", "company_description_text"),
+    ("social_", "html_link_href"),
+    ("careers_page", "careers_page_heading"),
+    ("news_checked", "news_page_text"),
+    ("nav_sitemap", "nav_sitemap_index"),
+)
+
+
+def _extraction_method(key_hint: str) -> str:
+    return next((method for prefix, method in EXTRACTION_METHODS if key_hint.startswith(prefix)), "page_text")
+
+
 def _evidence_id(source_url: str, field_name: str, index: int) -> str:
     raw = f"{source_url}:{field_name}:{index}"
     return "ev-" + hashlib.sha256(raw.encode()).hexdigest()[:12]
@@ -196,6 +218,7 @@ def profile_to_contract_envelope(
         content_sha256: str | None,
         claim_span: str | None,
         key_hint: str,
+        method: str | None = None,
     ) -> str | None:
         # Evidence is only emitted for content that was really fetched: a real
         # sha256 of the bytes, the true fetch time and a non-empty supporting span.
@@ -214,6 +237,7 @@ def profile_to_contract_envelope(
             "retrieved_at": retrieved_at,
             "content_sha256": content_sha256,
             "claim_span": span,
+            "extraction_method": method or _extraction_method(key_hint),
         }
         return ev_id
 
@@ -453,11 +477,13 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
     for item in nav.get("postings") or []:
         page = item.get("page_evidence") or {}
         if page:
-            ev = add_evidence(page.get("url"), "official_job_register", page.get("retrieved_at"), page.get("content_sha256"), page.get("claim_span"), f"nav_{item['uuid']}")
+            ev = add_evidence(page.get("url"), "official_job_register", page.get("retrieved_at"), page.get("content_sha256"), page.get("claim_span"), f"nav_{item['uuid']}", "nav_ad_page_title")
+            org_ev = add_evidence(page.get("url"), "official_job_register", page.get("retrieved_at"), page.get("content_sha256"), page.get("orgnr_span"), f"nav_org_{item['uuid']}", "nav_ad_page_employer_orgnr")
         else:
-            ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_span"), f"nav_{item['uuid']}")
+            ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_title_span"), f"nav_{item['uuid']}", "nav_ad_json_title")
+            org_ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_span"), f"nav_org_{item['uuid']}", "nav_ad_json_employer_orgnr")
         if ev:
-            nav_postings.append((item["url"], ev, {
+            nav_postings.append((item["url"], [ev, org_ev], {
                 "kind": "job_posting",
                 "title": item["title"],
                 "posted_date": item.get("published"),
@@ -482,18 +508,18 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         """One hiring_signal claim per fact: the careers page itself, then each posting."""
         emitted: set[str] = set()
         if careers:
-            url, ev, attrs = careers
-            claim = base_add_claim("hiring_signal", url, "available", round(0.9 * scale, 3), [ev])
+            url, evs, attrs = careers
+            claim = base_add_claim("hiring_signal", url, "available", round(0.9 * scale, 3), evs)
             claim.update({**attrs, "verification_method": site_method})
             emitted.add(url.rstrip("/").casefold())
         site_confidence = round(0.9 * scale, 3)
-        for url, ev, attrs in [*site_postings, *nav_postings]:
+        for url, evs, attrs in [*site_postings, *nav_postings]:
             key = url.rstrip("/").casefold()
             if key in emitted:
                 continue
             emitted.add(key)
             nav_item = attrs.get("platform") == "arbeidsplassen.nav.no"
-            claim = base_add_claim("hiring_signal", url, "available", 0.95 if nav_item else site_confidence, [ev])
+            claim = base_add_claim("hiring_signal", url, "available", 0.95 if nav_item else site_confidence, evs)
             claim.update(attrs if nav_item else {**attrs, "verification_method": site_method})
         if not emitted:
             states_with_check = fallback_evs + ([nav_checked_ev] if nav_checked_ev and fallback_state == "not_available" else [])
@@ -566,10 +592,12 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         news = web_claims.get("news") or {}
         news_count = 0
         for item in (news.get("items") or [])[:10]:
-            ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"news_{item.get('url')}")
+            source, method = item.get("source_page"), item.get("extraction_method") or "news_page_text"
+            ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"news_{item.get('url')}", method)
+            date_ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("date_span"), f"news_date_{item.get('url')}", method) if item.get("date_span") else None
             if ev:
                 stamp = item.get("published_at") or item.get("published_date")
-                claim = add_claim("dated_news", news_value(item["title"], stamp), "available", 0.9, [ev])
+                claim = add_claim("dated_news", news_value(item["title"], stamp), "available", 0.9, [ev, date_ev])
                 claim.update({"title": item["title"], "published_at": stamp, "url": item.get("url"), "date_source": item.get("date_source"), "source_url": item.get("source_page")})
                 news_count += 1
         if not news_count:
@@ -580,13 +608,13 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         jobs = web_claims.get("jobs") or {}
         site_postings = []
         for item in (jobs.get("postings") or [])[:25]:
-            ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"job_{item.get('url')}")
+            ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"job_{item.get('url')}", item.get("extraction_method") or "job_posting_text")
             if ev:
                 attrs = {k: item.get(k) for k in ("title", "posted_date", "valid_through", "platform") if item.get(k)}
-                site_postings.append((item["url"], ev, {"kind": "job_posting", **attrs, "source_url": item.get("source_page")}))
+                site_postings.append((item["url"], [ev], {"kind": "job_posting", **attrs, "source_url": item.get("source_page")}))
         careers = jobs.get("careers_page") if isinstance(jobs.get("careers_page"), dict) else {}
         careers_ev = add_evidence(careers.get("url"), "company_owned", careers.get("retrieved_at"), careers.get("content_sha256"), careers.get("claim_span"), "careers_page") if careers else None
-        careers_fact = (careers["url"], careers_ev, {"kind": "careers_page", "source_url": careers["url"], "openings_listed": not careers.get("explicit_no_openings")}) if careers_ev else None
+        careers_fact = (careers["url"], [careers_ev], {"kind": "careers_page", "source_url": careers["url"], "openings_listed": not careers.get("explicit_no_openings")}) if careers_ev else None
         add_hiring(careers_fact, site_postings, "failed" if deadline_hit else "not_available", round(0.6 * scale, 3), [web_ev], verification, scale)
         return
 
