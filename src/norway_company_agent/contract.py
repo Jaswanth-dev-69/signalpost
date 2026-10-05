@@ -6,9 +6,12 @@ import re
 import urllib.parse
 from typing import Any
 
+from .batch import evidence_terminal_state
 from .nav_jobs import company_orgnrs
 
 BULK_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv"
+# The starter kit's module list; its envelope (run_id, state, modules, profile) is embedded as-is.
+KIT_MODULES = ("registry", "accounting_obligation", "registry_live", "financials", "roles", "group", "locations", "website")
 WEB_FIELDS = ("official_website", "company_description", "social_profile", "dated_news", "hiring_signal")
 FINANCIAL_FIELDS = (
     ("revenue", "revenue", "sumDriftsinntekter"),
@@ -199,8 +202,13 @@ def profile_to_contract_envelope(
     completed_at: str,
     terminal_status: str = "completed",  # OUTPUT_CONTRACT.md terminal value
     third_party_cost_usd: float = 0.0,
+    modules: tuple[str, ...] | list[str] = KIT_MODULES,
 ) -> dict[str, Any]:
     """Transform an enriched company profile into the official Signalpost output contract.
+
+    The envelope carries both shapes: the OUTPUT_CONTRACT.md claims/evidence lists and the starter
+    kit's batch envelope (run_id, state, started_at, completed_at, modules, profile), whose profile
+    holds the source records and snapshots the claims were built from.
 
     Every evidence item carries the sha256 of bytes that were actually fetched (or of the
     bulk snapshot file the row came from), the fetch time and a span quoting the value.
@@ -414,8 +422,26 @@ def profile_to_contract_envelope(
     if summary_text:
         add_claim("summary_profile", summary_text, "available", 0.95, list(evidence_map.keys()))
 
+    module_states = {}
+    for module in modules:
+        record = records.get(module)
+        state = evidence_terminal_state(record)
+        if not record:
+            state = "budget_exhausted" if deadline_hit else "submission_error"
+        module_states[module] = {
+            "state": state,
+            "retry_count": int((record or {}).get("retry_count") or 0),
+            "final_timestamp": (record or {}).get("retrieved_at") or completed_at,
+        }
+    entity_state = "submission_error" if any(item["state"] == "submission_error" for item in module_states.values()) else "complete"
+
     return {
         "organisation_number": org,
+        "run_id": run_id,
+        "state": entity_state,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "modules": module_states,
         "run": {
             "run_id": run_id,
             "started_at": started_at,
@@ -431,6 +457,7 @@ def profile_to_contract_envelope(
             "runtime_ms": runtime_ms,
             "third_party_cost_usd": third_party_cost_usd,
         },
+        "profile": profile,
     }
 
 BOILERPLATE = re.compile(r"cookie|informasjonskapsl|javascript|personvern|privacy|logg inn|log in|handlekurv|nettleser|browser", re.I)

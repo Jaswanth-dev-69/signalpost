@@ -5,7 +5,7 @@ import time
 import unicodedata
 from typing import Any
 
-from .identity import DECLARED_DOMAIN_REJECT, _structured_names, _tokens, apply_website_identity_gate
+from .identity import DECLARED_DOMAIN_REJECT, _structured_names, _tokens, apply_website_identity_gate, publishable_social_links
 from .website import fetch_website
 
 FREEMAIL_DOMAINS = {
@@ -231,10 +231,7 @@ def discover_website_by_domain_search(
             "reasons": [reason],
         }
         value["discovery_method"] = method
-        value["social_links"] = [
-            {k: item[k] for k in ("platform", "url", "found_on_page", "href") if item.get(k)}
-            for item in value.get("discovered_social_links") or []
-        ]
+        value["social_links"] = publishable_social_links(profile, value)
         gated_website["value"] = value
         return gated_website, total_metrics
     return None, total_metrics

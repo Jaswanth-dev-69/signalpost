@@ -119,7 +119,26 @@ def assess_website_identity(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def assess_social_identity(profile: dict[str, Any], link: dict[str, str]) -> dict[str, Any]:
+def _handle_compact(url: str) -> str:
+    """The profile's own handle (not the platform prefix), lower-case alphanumerics only."""
+    parsed = urllib.parse.urlparse(url or "")
+    parts = [part for part in urllib.parse.unquote(parsed.path).split("/") if part]
+    if parts and parts[0].casefold() in {"company", "channel", "user", "c"}:
+        parts = parts[1:]
+    text = unicodedata.normalize("NFKD", parts[0] if parts else "").encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]", "", text.casefold())
+
+
+def _site_label(value: dict[str, Any]) -> str:
+    """First label of the verified site's registered domain (e.g. 'murhandtverk' for murhandtverk.no)."""
+    domain = str(value.get("registered_domain") or "")
+    if not domain:
+        host = urllib.parse.urlparse(str(value.get("final_url") or "")).hostname or ""
+        domain = host.removeprefix("www.")
+    return re.sub(r"[^a-z0-9]", "", domain.split(".")[0].casefold())
+
+
+def assess_social_identity(profile: dict[str, Any], link: dict[str, str], site_value: dict[str, Any] | None = None) -> dict[str, Any]:
     core = _tokens(profile.get("name"))
     parsed = urllib.parse.urlparse(link.get("url") or "")
     handle_text = urllib.parse.unquote(parsed.path)
@@ -139,6 +158,11 @@ def assess_social_identity(profile: dict[str, Any], link: dict[str, str]) -> dic
     else:
         score = 0.3
         reason = "social handle lacks strong exact-entity name evidence"
+        label = _site_label(site_value or {})
+        handle = _handle_compact(link.get("url") or "")
+        if len(label) >= 4 and not label.isdigit() and label in handle:
+            score = 0.9
+            reason = "social handle contains the verified website's domain name"
     return {
         **link,
         "identity_score": score,
@@ -147,6 +171,16 @@ def assess_social_identity(profile: dict[str, Any], link: dict[str, str]) -> dic
         "reason": reason,
         "method": "deterministic_social_handle_identity_v1",
     }
+
+
+def publishable_social_links(profile: dict[str, Any], value: dict[str, Any]) -> list[dict[str, str]]:
+    """Social links found on a verified site whose handle names the legal entity (the kit's gate)
+    or the verified site's own domain. Links to other organisations, people or posts are dropped."""
+    links = []
+    for item in value.get("discovered_social_links") or value.get("social_links") or []:
+        if assess_social_identity(profile, item, value)["publishable"]:
+            links.append({key: item[key] for key in ("platform", "url", "found_on_page", "href") if item.get(key)})
+    return links
 
 
 def apply_website_identity_gate(profile: dict[str, Any], website: dict[str, Any]) -> dict[str, Any]:
@@ -158,14 +192,10 @@ def apply_website_identity_gate(profile: dict[str, Any], website: dict[str, Any]
     value["identity_assessment"] = assessment
     original = list(value.get("discovered_social_links") or value.get("social_links") or [])
     value["discovered_social_links"] = original
-    social_assessments = [assess_social_identity(profile, link) for link in original]
-    value["social_link_assessments"] = social_assessments
-    # Links published from the company's own strictly verified website are
-    # company-owned claims. An unverified or ambiguous website publishes none.
-    value["social_links"] = [
-        {key: item[key] for key in ("platform", "url", "found_on_page", "href") if item.get(key)}
-        for item in original
-    ] if assessment["publishable"] else []
+    value["social_link_assessments"] = [assess_social_identity(profile, link, value) for link in original]
+    # Links from the company's own verified website, kept only when the handle itself names the
+    # entity or the site's brand. An unverified or ambiguous website publishes none.
+    value["social_links"] = publishable_social_links(profile, value) if assessment["publishable"] else []
     website["value"] = value
     return {
         "website": website,
@@ -270,9 +300,6 @@ def apply_registry_declared_gate(profile: dict[str, Any], website: dict[str, Any
         **assessment,
         "reasons": ["entity declared this exact domain as hjemmeside in Enhetsregisteret"],
     }
-    value["social_links"] = [
-        {key: item[key] for key in ("platform", "url", "found_on_page", "href") if item.get(key)}
-        for item in value.get("discovered_social_links") or []
-    ]
+    value["social_links"] = publishable_social_links(profile, value)
     website["value"] = value
     return True

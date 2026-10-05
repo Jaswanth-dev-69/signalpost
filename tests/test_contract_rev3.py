@@ -140,5 +140,52 @@ class Normalization(unittest.TestCase):
         self.assertIsNone(careers_heading(BeautifulSoup("<title>Prosjekter</title><h1>Våre prosjekter</h1>", "lxml")))
 
 
+class KitEnvelopeLayer(unittest.TestCase):
+    """The starter kit's batch envelope is embedded unchanged next to the claims."""
+
+    def test_envelope_carries_kit_fields_and_profile(self):
+        profile = verified_profile("811730912", "MTM SKOGSERVICE AS", "https://mtmskogservice.no/")
+        env = envelope(profile)
+        for key in ("run_id", "state", "started_at", "completed_at", "modules", "profile", "claims", "evidence"):
+            self.assertIn(key, env)
+        self.assertIs(env["profile"], profile)
+        self.assertEqual(env["modules"]["website"]["state"], "complete")
+        self.assertEqual(env["modules"]["registry"]["state"], "complete")
+
+    def test_missing_module_after_deadline_is_budget_exhausted(self):
+        profile = verified_profile("811730912", "MTM SKOGSERVICE AS", "https://mtmskogservice.no/")
+        del profile["evidence"]["website"]
+        profile["errors"] = [{"type": "DeadlineExceeded", "error": "deadline"}]
+        env = envelope(profile)
+        self.assertEqual(env["modules"]["website"]["state"], "budget_exhausted")
+        self.assertEqual(env["state"], "complete")
+
+
+class SocialGate(unittest.TestCase):
+    def setUp(self):
+        from norway_company_agent.identity import publishable_social_links
+        self.gate = publishable_social_links
+
+    def links(self, name: str, domain: str, urls: list[str]) -> list[str]:
+        value = {"registered_domain": domain, "final_url": f"https://{domain}/",
+                 "discovered_social_links": [{"platform": "x", "url": u} for u in urls]}
+        return [item["url"] for item in self.gate({"name": name}, value)]
+
+    def test_kit_name_gate_keeps_handles_naming_the_entity(self):
+        self.assertEqual(self.links("MTM SKOGSERVICE AS", "mtmskogservice.no", ["https://facebook.com/MtmSkogservice"]),
+                         ["https://facebook.com/MtmSkogservice"])
+
+    def test_site_domain_label_in_handle_is_kept(self):
+        self.assertEqual(self.links("ROSENBORG MURHÅNDTVERK AS", "murhandtverk.no", ["https://instagram.com/murhandtverk"]),
+                         ["https://instagram.com/murhandtverk"])
+
+    def test_other_organisations_people_and_posts_are_dropped(self):
+        urls = ["https://linkedin.com/company/amexgas", "https://facebook.com/599407360228640_1552122909951569",
+                "https://instagram.com/orsolyahaarberg"]
+        self.assertEqual(self.links("RAGASCO AS", "ragasco.com", urls), [])
+
+    def test_short_domain_label_is_not_enough(self):
+        self.assertEqual(self.links("NORDIC SUPPLY PARTNER AS", "nsp.no", ["https://instagram.com/nspnorge"]), [])
+
 if __name__ == "__main__":
     unittest.main()
