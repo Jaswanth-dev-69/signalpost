@@ -342,3 +342,13 @@ Options that need your decision (not done):
 
 - Unit tests cover the same cases, plus a malformed previous row that raises inside refresh
   (counted as failed, envelope kept).
+
+## H3 Dependency pins vs v2 (done)
+
+- `uv.lock`, v2 (0ded711) against rev3: **no package added or removed and no version changed** (111
+  packages). The 18 changed lines are (a) environment-marker rewrites on the NVIDIA/torch entries of
+  the optional `sentiment` extra, which is never installed by `uv sync`, and (b) the project entry's
+  source going `virtual` → `editable`, required for the `signalpost` project script.
+- `pyproject.toml` adds `[project.scripts]` and a build system. The build backend was a range
+  (`hatchling>=1.27,<2`); it is now pinned to `hatchling==1.32.4` (the version uv resolved).
+  Runtime dependencies are unchanged.
