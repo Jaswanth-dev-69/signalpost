@@ -103,3 +103,90 @@ C5 and C6.
   the scorer can read) rather than discovery.
 - New: `eval/kit_parity.py` (per-family companies/facts for kit, ours and the sample, with
   kit-only/ours-only companies) and `docs/QUESTIONS_FOR_BUILDERR.md`.
+
+## Steps 1.2 to 1.5: parity, causes and fixes (done)
+
+Runs are in the session scratchpad: `kit-*` is the unmodified kit, `v2-*` is the worktree at 0ded711, and
+`rev3b-*` is this branch at 9bcfcb8. Tool: `eval/kit_parity.py`. "Claims" reads our
+OUTPUT_CONTRACT claims. "Profile" reads our envelope the way the kit's is read
+(`profile.evidence.website`).
+
+Companies covered (facts in brackets):
+
+| Family | Kit proxy-200 | v2 proxy-200 | rev3 claims proxy-200 | rev3 profile proxy-200 | Kit sample-100 | rev3 claims sample-100 | Builderr sample | Cause of any gap | Fix |
+|---|---|---|---|---|---|---|---|---|---|
+| Website, any loaded registry homepage | 64 | 53 | 44 | **74** | 64 | 71 | 97 | Kit shows non-exact homepages as `available` (with `publishable:false`); our claims say `ambiguous` | Kit envelope embedded: same records, same shape |
+| Website, identity-exact | 25 | 53 | **44** | 44 | 55 | **71** | 84 | None (ours higher). 9 group/brand sites withdrawn, see below | — |
+| Description | 16 | 50 | **41** | 29 | 41 | **66** | 60 | — | — |
+| Social profile | 10 (17) | 32 (83) | **22 (45)** | 22 (45) | 28 (59) | **39 (83)** | 44 (91) | v2 read 0.0% officially: the list-valued claim was not read, and the kit-shape `social_links` was absent | Kit envelope embedded; kit handle gate |
+| Dated news | 0 | 29 (195) | **23 (164)** | — | 0 | **34 (252)** | 17 (LinkedIn) | No kit shape exists | C1/C2 claims kept |
+| Hiring signal | 0 | 4 (8) | **16 (18)** | — | 0 | **18 (21)** | 2 (LinkedIn) | No kit shape exists | C1 careers page + postings |
+| Registry: identity / financial records / roles / subunits | 200 / 564 / 906 / 263 | | | 200 / 565 / 906 / 263 | | | | Claims carry only the latest accounts | Kit profile embedded: full parity |
+
+Proxy-200 wall time: kit 250 s (8 workers), v2 261 s, rev3 267 s (+6 s from the shared-domain scan running during pass 1).
+
+What changed, and why:
+
+1. **Kit envelope embedded** (commit 2c6fc3b). Every envelope now also carries `run_id`, `state`,
+   `started_at`, `completed_at`, `modules` and `profile`, exactly as the kit emits them. This is the
+   only shape known to score (13.07 recall). The profile is the source-snapshot record the claims are
+   built from, so it repeats the same values and does not publish competing ones. Missing modules after
+   the deadline are `budget_exhausted`, not `submission_error`.
+2. **Kit social handle gate** (2c6fc3b). v2 published every social link on a verified site. On
+   sample-100, 26 of 102 failed the kit gate, among them another company's LinkedIn (Ragasco to
+   `amexgas`), a photographer's personal pages for a gallery, and seven Facebook post ids. The gate is
+   now kit-or-domain-label: the handle must contain the legal-name tokens or the verified site's domain
+   label (at least 4 characters). Cost: sample 41→39 and proxy 26→22 companies, still 1.4–2.2× the kit.
+3. **Verbatim registry spans** (9bcfcb8). 120 of 270 BRREG-API spans in v2/rev3 were `" | "`-joined
+   composites that appear nowhere in the source. All financial, roles and subunit spans were affected,
+   on every company. The kit has no spans at all, so it cannot fail this check. Now each span is one
+   compact-JSON fragment, and bulk spans are two adjacent quoted CSV cells. Re-check: 443/443 API spans
+   verbatim, and bulk spans are verbatim in the snapshot. Financial claims carry `reporting_period`, and
+   their evidence carries `effective_at`.
+4. **Shared declared domains** (9bcfcb8). The registry-declared rule (added in v2) published group,
+   chain and provider sites: `klp.no` for a KLP fund (13 declarants), `eiendomsmegler1.no` (3),
+   `AGR.com` for ABL Group Norway (3), `ulstein.com` (6) and `ringbo.no` (76, a cable provider). The
+   contract says such relations are "labelled, not collapsed". A domain declared by 2 or more entities
+   is now labelled `shared_group_brand_or_provider_site` and is not published. This withdrew 9
+   proxy-200 websites, all reviewed by hand as group, brand or provider sites.
+
+Evidence elements, kit vs rev3:
+
+| Element | Kit | rev3 |
+|---|---|---|
+| Claim-level source URL | No claims; one record per module | Every claim cites evidence with its own URL |
+| Retrieval time | Per module record | Per evidence item, plus the kit records |
+| Reporting/effective period | `effective_at` null | `reporting_period` on financial claims and `effective_at` on their evidence |
+| Content hash | Per module record (fetched bytes) | Per evidence item (fetched bytes), plus the kit records |
+| Extraction method | None | Every evidence item |
+| Span validity | No spans | Registry API 443/443; web 99.4% (evidence_audit, 163 items, all URLs reopen) |
+| Availability state | Module states | Claim states plus kit module states |
+| Refresh metadata | started/completed, per-module final_timestamp | Same, plus `run` and `changes` |
+| Prior snapshots / refresh diff | None in the batch runner | None yet (Phase 2) |
+
+Audits on rev3 proxy-200: schema validator 0 errors; `precision_audit` 100/100 supported, 0
+wrong-company; `evidence_audit` 163/163 URLs load, 99.4% spans verbatim, 70.6% hashes identical on
+re-fetch (dynamic pages; reported as measured); red team 35 high-risk companies, 0 false positives;
+122 unit tests pass.
+
+Verdicts on the inferences:
+
+- **I1 (partly true).** The nine 13.07/26.98 entries fit the unmodified kit. But v2 was *not* below
+  the kit in what it found: it was above it in every external family. The gap is in what the scorer
+  could read (no kit `profile`, list-valued social claim) and probably in invalid spans (item 3) and
+  group sites (item 4).
+- **I2 (still unproven).** The C1 per-fact claims stay as the claims layer. Social now also sits in the
+  kit's known location. News and hiring have no known shape; only Builderr can confirm them
+  (QUESTIONS Q3/Q4).
+- **I3 (not testable locally).** Registry families are at full parity through the embedded profile
+  either way.
+
+**Decision: ours, with the kit envelope as the base layer** (not a kit fork). Our output is ≥ the kit
+in every external family and every evidence element on proxy-200 and the sample, the precision audit
+is clean, and wall time matches v2. The Phase-1 gate is passed.
+
+## Next step
+
+Phase 2: run the same 50 companies twice back to back (determinism, false changes, duplicates). Add a
+previous-envelopes input for refresh: preserve prior evidence and emit typed material changes with the
+kit's `refresh.diff_profile` shape. Then walk the official-run checks one by one.
