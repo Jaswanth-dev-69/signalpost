@@ -995,8 +995,10 @@ def crawl_web_claims(website_value: dict[str, Any], *, timeout: float = 10.0, de
     for page in extra_pages:
         if _is_html(page):
             extra_links.extend(_same_site_links(page["url"], _soup(page), domain))
-    news = discover_news(fetcher, home, home_soup, extra_links)
+    # Careers first: it costs a few requests and decides a whole company's hiring coverage, while a
+    # budget cut during news only drops some of up to ten articles.
     jobs = discover_jobs(fetcher, home, home_soup, extra_pages)
+    news = discover_news(fetcher, home, home_soup, extra_links)
     # crawl_complete is false when the company's web budget cut the crawl short: absence of an item is
     # then not evidence that it is gone (refresh relies on this to avoid false changes).
     claims = {"news": news, "jobs": jobs, "crawl_errors": fetcher.errors[:50], "crawl_complete": not fetcher.deadline_hit}
