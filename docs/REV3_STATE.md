@@ -247,3 +247,15 @@ financial figures, active roles and subunits found **0 disagreements** between t
   logic applied to the 50-company pair also gives 0 changes. Unit tests cover: same snapshot gives no
   changes; a new filing gives one kit-shaped change and keeps the old evidence; a failed website fetch
   is preserved, not reported as removed; a new article gives an `added` event.
+
+## A4 `external` block (done)
+
+- In Builderr's sample, all 87 `approved` handles are social links from the company's own verified
+  site (`web.value.social_links`). `experimental` marks only LinkedIn pages Builderr's crawler read on
+  LinkedIn: 11 found from the LinkedIn profile and 4 site-linked ones whose LinkedIn page was also
+  read. The `linkedin` block (profile/posts/jobs) is LinkedIn-read data.
+- Our gated site-linked handles are exactly the `approved` class. Each envelope now carries
+  `external: {"handles": [{platform, url, rightsStatus: "approved", source_url}]}`, built from the same
+  identity-gated `social_links` as the claims and empty when the site is not verified. There is no
+  `linkedin` block and nothing `experimental`, because we never read LinkedIn. The placement question
+  (envelope top level or inside `profile`) is Q13 in `QUESTIONS_FOR_BUILDERR.md`.

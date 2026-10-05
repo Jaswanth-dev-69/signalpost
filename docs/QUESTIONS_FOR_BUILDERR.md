@@ -52,3 +52,12 @@ Each question names the exact choice it decides for us. A one-word answer is eno
     budget or get blocked by the network policy?
 12. **Network policy.** Are company websites, `arbeidsplassen.nav.no` and `data.brreg.no` all
     reachable from the evaluator? Any rate limit or proxy?
+
+## E. Sample-site shape
+
+13. **`external.handles`.** In your `/signalpost` sample, every `approved` handle is a social link
+    from the company's own verified site, and `experimental` marks LinkedIn pages read from LinkedIn.
+    Since rev3 our envelope carries `external: {"handles": [{platform, url, rightsStatus: "approved",
+    source_url}]}` built only from site-linked, identity-gated links. We never read LinkedIn, so there
+    is no `linkedin` block. Does the scorer read `external.handles`, and is the envelope's top level the
+    right place (or inside `profile`)?

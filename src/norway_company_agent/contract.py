@@ -470,6 +470,17 @@ def profile_to_contract_envelope(
         }
     entity_state = "submission_error" if any(item["state"] == "submission_error" for item in module_states.values()) else "complete"
 
+    # Builderr's sample-site `external.handles`: "approved" handles there are exactly the social links
+    # of a verified company site. Ours are the same gated links; nothing here is read from the
+    # platforms themselves, so there is no `linkedin` block and nothing is "experimental".
+    web_value = (records.get("website") or {}).get("value") or {}
+    handles = [
+        {"platform": item["platform"], "url": item["url"], "rightsStatus": "approved",
+         "source_url": item.get("found_on_page") or web_value.get("final_url")}
+        for item in (web_value.get("social_links") or [])
+        if (web_value.get("identity_assessment") or {}).get("publishable") and (records.get("website") or {}).get("status") == "available"
+    ]
+
     return {
         "organisation_number": org,
         "run_id": run_id,
@@ -492,6 +503,7 @@ def profile_to_contract_envelope(
             "runtime_ms": runtime_ms,
             "third_party_cost_usd": third_party_cost_usd,
         },
+        "external": {"handles": handles},
         "profile": profile,
     }
 
