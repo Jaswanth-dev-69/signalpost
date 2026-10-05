@@ -172,8 +172,9 @@ Local baselines (v2, our UA). Proxy-200: verified website 26%, social 16%, dated
 1. C1: shape and normalization. One claim per fact: `social_profile` (canonical URL, case-insensitive
    handles lowercased), `hiring_signal` (careers-page URL, `available`, plus one claim per posting),
    `dated_news` (`"Title (published datetime)"` with `title`, `published_at` and `url` keys). Each claim
-   gets its own exact-page evidence. Add the contract's missing sections (legal identity, source
-   snapshots as a kit-compatible `profile`).
+   gets its own exact-page evidence. (A kit-compatible `profile` block was considered and left out.
+   It would duplicate every claim and could expose unverified data. It needs Builderr's answer to
+   UNKNOWN Q2 first.)
 2. C2: evidence. News evidence moves to the article page; datetime from meta, JSON-LD or `<time>`;
    extraction method recorded.
 3. C4: discovery. Sitemap and nav menus for news and careers, sub-sections, English paths.

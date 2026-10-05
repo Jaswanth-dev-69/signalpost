@@ -80,6 +80,31 @@ def qualification_copy(score: dict | None, independent_score: dict | None = None
     )
 
 
+def public_signals(row: dict) -> dict:
+    """Dated news and hiring signals with links to the exact pages they were read from.
+    web_claims exist only for websites that passed the entity gate; NAV ads match the org number."""
+    claims = row.get("web_claims") or {}
+    news = [
+        {"title": item.get("title"), "date": item.get("published_at") or item.get("published_date"), "url": item.get("url"),
+         "source": item.get("source_page"), "retrievedAt": item.get("retrieved_at")}
+        for item in (claims.get("news") or {}).get("items") or []
+    ][:10]
+    jobs = claims.get("jobs") or {}
+    hiring = []
+    careers = jobs.get("careers_page")
+    if isinstance(careers, dict) and careers.get("url"):
+        hiring.append({"title": careers.get("claim_span") or "Careers page", "kind": "careers_page", "url": careers["url"],
+                       "source": careers["url"], "retrievedAt": careers.get("retrieved_at")})
+    for item in jobs.get("postings") or []:
+        hiring.append({"title": item.get("title"), "kind": "job_posting", "date": item.get("posted_date"), "url": item.get("url"),
+                       "source": item.get("source_page"), "retrievedAt": item.get("retrieved_at")})
+    for item in (row.get("nav_jobs") or {}).get("postings") or []:
+        page = item.get("page_evidence") or {}
+        hiring.append({"title": item.get("title"), "kind": "job_posting", "date": item.get("published"), "url": item.get("url"),
+                       "source": page.get("url") or item.get("entry_url"), "retrievedAt": page.get("retrieved_at") or item.get("entry_retrieved_at")})
+    return {"news": news, "hiring": hiring[:25]}
+
+
 def compact(row: dict, external_observations: list[dict] | None = None) -> dict:
     evidence = row.get("evidence", {})
     financial = evidence.get("financials", {})
@@ -199,6 +224,7 @@ def compact(row: dict, external_observations: list[dict] | None = None) -> dict:
         "liveStatus": live.get("status", "not_run"),
         "changes": row.get("change_history") or [],
         "external": external,
+        "signals": public_signals(row),
     }
 
 
@@ -266,6 +292,10 @@ function injectLinkedInLayer(){{const profileRoot=$('#profile');if(!selected||!p
 const baseAgentBody=agentBody;agentBody=(x,mode)=>{{const li=x.external?.linkedin||{{}},profile=li.profile||{{}},jobs=li.jobs||[],posts=li.posts||[];if(mode==='social')return li.available?`<p><strong>LinkedIn:</strong> ${{profile.followers??'unreported'}} followers · ${{profile.visible_employees??'unreported'}} associated profiles · ${{esc(profile.employee_size_label||'size not reported')}}.${{cite(profile.source)}}</p>`:baseAgentBody(x,mode);if(mode==='hiring')return jobs.length?`<p>${{jobs.slice(0,5).map(j=>`<strong>${{esc(j.title||'Role')}}</strong> — ${{esc(j.location||'location not reported')}}`).join('<br>')}}${{cite(jobs[0].job_url||jobs[0].source)}}</p>`:'<p>No exact-company LinkedIn job posting was captured in this snapshot.</p>';if(mode==='activity')return posts.length?`<p><strong>${{posts.length}} recent public post(s) captured.</strong><br>${{posts.slice(0,3).map(p=>esc(p.text||'Post captured')).join('<br><br>')}}</p>`:'<p>No exact-company public LinkedIn post was captured in this snapshot.</p>';return baseAgentBody(x,mode)}};
 const baseRequestedModes=requestedModes;requestedModes=question=>{{const modes=baseRequestedModes(question),q=norm(question);if(/job|hiring|hire|career|vacan|stilling|recruit/.test(q))modes.push('hiring');if(/post|activity|buzz|engagement|reaction|comment|talking/.test(q))modes.push('activity');return [...new Set(modes)]}};
 renderAgent=()=>{{const x=selected;if(!x){{$('#agent-output').innerHTML='<p>Choose a company first.</p>';return}}const modes=agentQuestion?requestedModes(agentQuestion):[agentMode],labels={{overview:'Company record',financials:'Financials',leaders:'Leadership',locations:'Locations',social:'LinkedIn',hiring:'Hiring',activity:'Public activity',sentiment:'Sentiment'}};let body=modes.map(mode=>`<div class="answer-block"><small>${{labels[mode]||esc(mode)}}</small>${{agentBody(x,mode)}}</div>`).join('');if(agentQuestion)body=`<p class="agent-question"><small>Your question</small><br><strong>${{esc(agentQuestion)}}</strong></p>`+body;$('#agent-output').innerHTML=body;$('#agent-buttons').querySelectorAll('button').forEach(b=>b.classList.toggle('active',!agentQuestion&&b.dataset.mode===agentMode))}};
+function renderSignals(x){{const s=x.signals||{{}},news=s.news||[],hiring=s.hiring||[];if(!news.length&&!hiring.length)return '';const row=i=>`<div class="item"><strong><a href="${{esc(i.url)}}" target="_blank" rel="noreferrer">${{esc(i.title||i.url)}}</a></strong><small>${{i.kind==='careers_page'?'Careers page · ':''}}${{i.date?esc(i.date)+' · ':''}}<a href="${{esc(i.source||i.url)}}" target="_blank" rel="noreferrer">source ↗</a>${{i.retrievedAt?' · retrieved '+esc(i.retrievedAt):''}}</small></div>`;return `<section id="public-signals"><div class="section-label">Company news and hiring</div>${{news.length?`<h3>${{news.length}} dated news item(s)</h3><div class="activity-list">${{news.map(row).join('')}}</div>`:''}}${{hiring.length?`<h3 style="margin-top:18px">Hiring signals</h3><div class="people">${{hiring.map(row).join('')}}</div>`:''}}</section>`}}
+function injectSignals(){{const root=$('#profile');if(!selected||!root||$('#public-signals'))return;const html=renderSignals(selected);if(html)root.insertAdjacentHTML('beforeend',html)}}
+const signalAgentBody=agentBody;agentBody=(x,mode)=>{{const h=x.signals?.hiring||[],n=x.signals?.news||[];if(mode==='hiring'&&!(x.external?.linkedin?.jobs||[]).length&&h.length)return `<p>${{h.slice(0,5).map(i=>`<strong>${{esc(i.title||'Hiring signal')}}</strong>${{i.date?' — '+esc(i.date):''}}${{cite(i.source||i.url)}}`).join('<br>')}}</p>`;if(mode==='activity'&&!(x.external?.linkedin?.posts||[]).length&&n.length)return `<p>${{n.slice(0,3).map(i=>`<strong>${{esc(i.title)}}</strong> — ${{esc(i.date||'')}}${{cite(i.url)}}`).join('<br>')}}</p>`;return signalAgentBody(x,mode)}};
+new MutationObserver(injectSignals).observe($('#profile'),{{childList:true}});
 const baseRenderList=renderList;renderList=()=>{{baseRenderList();queueMicrotask(injectLinkedInLayer)}};new MutationObserver(injectLinkedInLayer).observe($('#profile'),{{childList:true}});injectLinkedInLayer();renderAgent();
 if(SCORE.scorer==='signalpost_all_source_completeness_v1')$('#core-score').textContent=`${{Number(SCORE.raw_score||0).toFixed(2)}}/100 experimental · ${{Number(SCORE.awardable_score||0).toFixed(2)}}/100 strict`;
 </script></body></html>'''

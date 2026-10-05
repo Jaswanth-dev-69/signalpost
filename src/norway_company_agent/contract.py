@@ -81,14 +81,23 @@ def _period_text(period: Any) -> str:
     return _span_value(period)
 
 
+def _word_bounded(text: str, start: int, end: int) -> str:
+    """text[start:end] widened so it neither starts nor ends mid-word."""
+    if start > 0 and not text[start - 1].isspace():
+        start = text.rfind(" ", 0, start) + 1
+    if end < len(text) and not text[end].isspace():
+        stop = text.find(" ", end)
+        end = stop if stop != -1 else len(text)
+    return " ".join(text[start:end].split())
+
+
 def _snippet(text: str, needle: str, width: int = 90) -> str | None:
     if not text or not needle:
         return None
     index = text.casefold().find(needle.casefold())
     if index < 0:
         return None
-    start = max(0, index - width)
-    return " ".join(text[start:index + len(needle) + width].split())
+    return _word_bounded(text, max(0, index - width), index + len(needle) + width)
 
 
 def _org_number_snippet(text: str, org: str) -> str | None:
@@ -98,8 +107,7 @@ def _org_number_snippet(text: str, org: str) -> str | None:
     match = re.search(r"(?<!\d)" + pattern + r"(?!\d)", text)
     if not match:
         return None
-    start = max(0, match.start() - 90)
-    return " ".join(text[start:match.end() + 90].split())
+    return _word_bounded(text, max(0, match.start() - 90), match.end() + 90)
 
 
 def _live_registry_values(record: dict[str, Any]) -> dict[str, Any]:
@@ -292,10 +300,12 @@ def profile_to_contract_envelope(
         span = f"{org} {REGISTRY_KEYS.get(field, field)}: {_span_value(value)}"
         if live_ok and (not bulk_ok or live_values.get(field) == value):
             # Literal fragments of the API's compact JSON, so the quote can be found verbatim.
-            live_span = f'"organisasjonsnummer":"{org}" | ' + (
+            # One verbatim fragment of the API's compact JSON (the URL carries the org number);
+            # an unregistered field cannot be quoted, so the entity's own literal is cited.
+            live_span = (
                 f'"{LIVE_JSON_KEYS[field]}":{json.dumps(value, ensure_ascii=False)}'
                 if value not in (None, "") and field in LIVE_JSON_KEYS
-                else f"{REGISTRY_KEYS.get(field, field)}: not registered"
+                else f'"organisasjonsnummer":"{org}"'
             )
             return evidence_from(live, live_span, f"registry_{field}", "official_registry_live")
         if bulk_ok:

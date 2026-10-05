@@ -619,7 +619,7 @@ def _sitemap_article_urls(fetcher: SiteFetcher, home_url: str) -> tuple[list[dic
         except ET.ParseError:
             return [], []
     dated: list[dict[str, Any]] = []
-    urls: list[str] = []
+    urls: list[tuple[str, str]] = []
     for node in root.findall("s:url", ns):
         loc = (node.findtext("s:loc", default="", namespaces=ns) or "").strip()
         pub = node.findtext("n:news/n:publication_date", default="", namespaces=ns)
@@ -632,8 +632,10 @@ def _sitemap_article_urls(fetcher: SiteFetcher, home_url: str) -> tuple[list[dic
                 "claim_span": " ".join(title.split())[:300], "date_span": pub.strip(), "extraction_method": "news_sitemap:publication_date",
             })
         elif loc and is_news_article(loc):
-            urls.append(loc)
-    return dated, urls
+            urls.append((node.findtext("s:lastmod", default="", namespaces=ns) or "", loc))
+    # Most recently changed articles first (lastmod is not a publication date; each article page is
+    # still fetched for its own date).
+    return dated, [loc for _, loc in sorted(urls, reverse=True)]
 
 
 def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: BeautifulSoup, extra_links: list[tuple[str, str]]) -> dict[str, Any]:
@@ -650,6 +652,7 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
         items.setdefault(item["url"], item)
 
     listing_page = None
+    listing_has_articles = False
     for url in listings[:2]:
         listing_page = fetcher.get(url, "news")
         if _is_html(listing_page):
@@ -676,6 +679,7 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
                     listing_links = _same_site_links(archive["url"], soup, domain)
                     listing_articles = [u for u, _ in listing_links if is_news_article(u)]
         articles = list(dict.fromkeys(listing_articles + articles))
+        listing_has_articles = bool(listing_articles)
         for item in _listing_inline_items(listing_page, soup, domain) + _jsonld_article_items(listing_page, soup, domain):
             items.setdefault(item["url"], item)
         text = " ".join(soup.get_text(" ", strip=True).split())
@@ -709,20 +713,22 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
             for item in _wordpress_posts(fetcher, home, domain):
                 items.setdefault(item["url"], item)
 
-    if not items and not articles:
+    # The sitemap finds articles that a JavaScript-rendered listing does not link statically,
+    # including nested news sections (e.g. /fag-og-forskning/.../nyheter-rkr/...).
+    if not items and not listing_has_articles:
         dated, sitemap_urls = _sitemap_article_urls(fetcher, home["url"])
         for item in dated:
             items.setdefault(item["url"], item)
-        articles = sitemap_urls[:20]
+        articles = list(dict.fromkeys(sitemap_urls[:MAX_NEWS_ITEMS] + articles))
 
     for url in articles:
         if len(items) >= MAX_NEWS_ITEMS:
             break
         if url in items:
             continue
-        page = fetcher.get(url, "news")
+        page = fetcher.get(url, "news_article")
         if page is None:
-            if fetcher.budget.get("news", 0) >= FAMILY_FETCH_CAP:
+            if fetcher.budget.get("news_article", 0) >= FETCH_CAPS["news_article"]:
                 break
             continue
         if not _is_html(page):

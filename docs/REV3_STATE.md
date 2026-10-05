@@ -48,8 +48,27 @@ above 65. Branch `rev3`, cut from main at 0ded7110.
     make the scorer pick up unverified data, so I left it out pending Builderr's answer to
     UNKNOWN Q2.
 
+- **C2 done** (commits 58f0d0b + this one).
+  - Every evidence `claim_span` is a verbatim fragment of the cited page. There are no `" | "`
+    composites; a live registry span is one compact-JSON fragment. Each evidence item records an
+    `extraction_method`.
+  - News items are re-read from their own article page (title span plus a separate raw date span).
+    `published_at` is the page's own ISO string, kept as written; Sunnaas JSON-LD
+    `2025-09-22T20:00:00+02:00` matches Builderr's key exactly.
+  - JS-rendered listings fall back to `/sitemap.xml` news articles, newest lastmod first, fetched
+    for their own dates. Sunnaas went from 0 to 10 items.
+  - NAV postings: a title span plus a raw employer org-number span.
+  - Viewer: a "Company news and hiring" section links every news item, careers page and NAV/site
+    posting to its source page. The agent's hiring and activity answers use it when LinkedIn data
+    is absent. Headless Chrome render checked.
+  - Proxy-200 (C2): website 26.5%, social 16.0%, news 14.0%, hiring 9.5% (17 careers pages,
+    8 postings), description 25.0%. Wall 255 s; pass 2 150 s, unchanged from v2.
+  - Audits: `eval/precision_audit.py` 100/100 supported, 0 wrong-company.
+    `eval/evidence_audit.py` (100 external claims, 153 evidence items): all URLs load, 99.3% of
+    spans verbatim, 71% of hashes identical on re-fetch (dynamic pages).
+
 ## Next step
 
-C2: evidence flow. Spans must be verbatim text from the cited page (no `" | "` composites). News
-evidence moves to the article page with its own timestamp. Record the extraction method. Audit 100
-claims.
+C4: discovery. Careers links in nav menus to depth 2, sitemap-driven careers and news URLs,
+English paths. Then C3 (Accept header and HTTP 406; JS-shell declared homepages such as Elopak),
+C5 and C6.
