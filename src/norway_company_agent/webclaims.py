@@ -132,6 +132,7 @@ class SiteFetcher:
     """Same-registered-domain fetcher with per-family fetch budgets and request metrics."""
 
     def __init__(self, domain: str, *, timeout: float, max_bytes: int = 1_500_000, deadline: float | None = None):
+        self.deadline_hit = False
         self.domain = domain
         self.timeout = timeout
         self.max_bytes = max_bytes
@@ -153,6 +154,9 @@ class SiteFetcher:
         if self.budget.get(family, 0) >= FETCH_CAPS.get(family, FAMILY_FETCH_CAP):
             return None
         if self.deadline is not None and time.monotonic() > self.deadline:
+            if not self.deadline_hit:
+                self.deadline_hit = True
+                self.errors.append({"url": url, "error": "company web budget reached; this and later pages not fetched"})
             return None
         if registered_domain(url) != self.domain:
             return None
@@ -942,5 +946,7 @@ def crawl_web_claims(website_value: dict[str, Any], *, timeout: float = 10.0, de
             extra_links.extend(_same_site_links(page["url"], _soup(page), domain))
     news = discover_news(fetcher, home, home_soup, extra_links)
     jobs = discover_jobs(fetcher, home, home_soup, extra_pages)
-    claims = {"news": news, "jobs": jobs, "crawl_errors": fetcher.errors[:20]}
+    # crawl_complete is false when the company's web budget cut the crawl short: absence of an item is
+    # then not evidence that it is gone (refresh relies on this to avoid false changes).
+    claims = {"news": news, "jobs": jobs, "crawl_errors": fetcher.errors[:50], "crawl_complete": not fetcher.deadline_hit}
     return claims, fetcher.metrics()

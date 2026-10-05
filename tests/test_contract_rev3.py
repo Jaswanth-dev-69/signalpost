@@ -368,5 +368,41 @@ class RefreshBaselineRobustness(unittest.TestCase):
         self.assertEqual(envs[0]["refresh"]["previous_run_id"], None)
 
 
+class RefreshUnconfirmedDifferences(unittest.TestCase):
+    """H5: a crawl cut short or a page that failed to load never produces a change event."""
+
+    def run_pair(self, before_mutate, after_mutate):
+        import copy
+        from norway_company_agent.envelope_refresh import refresh_envelope
+        careers = {"url": "https://ex.no/karriere", "retrieved_at": T, "content_sha256": HASH_PAGE, "claim_span": "Karriere"}
+        base = verified_profile("923609016", "EXAMPLE ASA", "https://ex.no/", careers=careers)
+        before, after = copy.deepcopy(base), copy.deepcopy(base)
+        before_mutate(before)
+        after_mutate(after)
+        return refresh_envelope(envelope(after), envelope(before))
+
+    def test_careers_page_missing_after_budget_cut_is_not_removed(self):
+        def cut(p):
+            p["web_claims"]["jobs"]["careers_page"] = None
+            p["web_claims"]["crawl_complete"] = False
+        env = self.run_pair(lambda p: None, cut)
+        self.assertEqual(env["changes"], [])
+        self.assertEqual(env["refresh"]["unconfirmed_removals"][0]["field"], "hiring_signal")
+
+    def test_item_whose_page_failed_last_run_is_newly_observed_not_added(self):
+        def failed(p):
+            p["web_claims"]["jobs"]["careers_page"] = None
+            p["web_claims"]["crawl_errors"] = [{"url": "https://ex.no/karriere", "error": "timed out"}]
+        env = self.run_pair(failed, lambda p: None)
+        self.assertEqual(env["changes"], [])
+        self.assertEqual(env["refresh"]["newly_observed"][0]["field"], "hiring_signal")
+
+    def test_same_title_and_timestamp_give_one_news_claim(self):
+        item = {"title": "Teknologidagene", "published_at": "2026-06-11T08:48:32+00:00", "retrieved_at": T, "content_sha256": HASH_PAGE, "claim_span": "Teknologidagene"}
+        news = [{**item, "url": "https://ex.no/a", "source_page": "https://ex.no/a"}, {**item, "url": "https://ex.no/b", "source_page": "https://ex.no/b"}]
+        env = envelope(verified_profile("923609016", "EXAMPLE ASA", "https://ex.no/", news=news))
+        self.assertEqual(len(available(env, "dated_news")), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

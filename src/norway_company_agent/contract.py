@@ -675,13 +675,19 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         # Dated news: one claim per article, keyed "title (publication timestamp)".
         news = web_claims.get("news") or {}
         news_count = 0
+        news_seen: set[str] = set()
         for item in (news.get("items") or [])[:10]:
+            stamp = item.get("published_at") or item.get("published_date")
+            value = news_value(item["title"], stamp)
+            if value in news_seen:
+                # Two pages with the same title and timestamp give one fact, not duplicate records.
+                continue
             source, method = item.get("source_page"), item.get("extraction_method") or "news_page_text"
             ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"news_{item.get('url')}", method)
             date_ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("date_span"), f"news_date_{item.get('url')}", method) if item.get("date_span") else None
             if ev:
-                stamp = item.get("published_at") or item.get("published_date")
-                claim = add_claim("dated_news", news_value(item["title"], stamp), "available", 0.9, [ev, date_ev])
+                news_seen.add(value)
+                claim = add_claim("dated_news", value, "available", 0.9, [ev, date_ev])
                 claim.update({"title": item["title"], "published_at": stamp, "url": item.get("url"), "date_source": item.get("date_source"), "source_url": item.get("source_page")})
                 news_count += 1
         if not news_count:

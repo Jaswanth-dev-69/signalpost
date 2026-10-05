@@ -103,6 +103,20 @@ def refresh_envelope(current: dict[str, Any], previous: dict[str, Any] | None) -
     preserved_claims: list[dict[str, Any]] = []
     web_record = (new_profile.get("evidence") or {}).get("website")
     web_failed = _failed(web_record) or any(e.get("type") == "DeadlineExceeded" for e in new_profile.get("errors") or [])
+    # A crawl cut short by the company's web budget, or a page that failed to load, says nothing about
+    # whether an item is gone (or new): such differences are recorded, never reported as changes.
+    old_web, new_web = old_profile.get("web_claims") or {}, new_profile.get("web_claims") or {}
+    old_errors = {e.get("url") for e in old_web.get("crawl_errors") or [] if isinstance(e, dict)}
+    new_errors = {e.get("url") for e in new_web.get("crawl_errors") or [] if isinstance(e, dict)}
+    old_incomplete, new_incomplete = old_web.get("crawl_complete") is False, new_web.get("crawl_complete") is False
+    unconfirmed: dict[str, list[Any]] = {"unconfirmed_removals": [], "newly_observed": [], "no_longer_listed": []}
+
+    def claim_urls(claim: dict[str, Any]) -> set[Any]:
+        urls = {claim.get("url"), claim.get("source_url")}
+        if isinstance(claim.get("value"), str) and claim["value"].startswith("http"):
+            urls.add(claim["value"])
+        return urls - {None}
+
     for field in CLAIM_FIELDS:
         old, new = available(previous, field), available(current, field)
         if web_failed:
@@ -112,6 +126,16 @@ def refresh_envelope(current: dict[str, Any], previous: dict[str, Any] | None) -
             continue
         for key in sorted(set(old) ^ set(new)):
             claim = new.get(key) or old[key]
+            if key in old and field == "dated_news":
+                unconfirmed["no_longer_listed"].append(claim.get("value"))  # listings keep only the newest items
+                continue
+            if key in old and (new_incomplete or claim_urls(claim) & new_errors):
+                unconfirmed["unconfirmed_removals"].append({"field": field, "value": claim.get("value")})
+                preserved_claims.append({**claim, "preserved_from_run_id": previous.get("run_id") or (previous.get("run") or {}).get("run_id")})
+                continue
+            if key in new and (old_incomplete or claim_urls(claim) & old_errors):
+                unconfirmed["newly_observed"].append({"field": field, "value": claim.get("value")})
+                continue
             evidence = [(new_evidence if key in new else old_evidence).get(i) or {} for i in claim.get("evidence_ids") or []]
             first = evidence[0] if evidence else {}
             changes.append({
@@ -145,6 +169,7 @@ def refresh_envelope(current: dict[str, Any], previous: dict[str, Any] | None) -
         "material_changes": len(changes),
         "fields_not_refreshed": sorted(preserved_fields),
         "preserved_claims": preserved_claims,
+        **unconfirmed,
         "prior_evidence": prior[:MAX_PRIOR_EVIDENCE],
     }
     return current
