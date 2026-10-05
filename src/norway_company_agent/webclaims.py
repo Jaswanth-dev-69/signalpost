@@ -35,14 +35,16 @@ NEWS_SEGMENTS = {
     "aktuelt", "nyheter", "nyhet", "nyheiter", "news", "blogg", "blog", "presse", "pressemeldinger",
     "siste-nytt", "artikler", "artikkel", "aktuelt-og-nyheter", "nyhetsarkiv", "innsikt",
 }
-NEWS_PROBE_PATHS = ("/aktuelt", "/nyheter", "/news", "/blogg")
+NEWS_PROBE_PATHS = ("/aktuelt", "/nyheter", "/news", "/blogg", "/presse", "/en/news")
 NEWS_SKIP_SEGMENTS = {"side", "page", "kategori", "category", "tag", "tags", "author", "forfatter", "feed", "arkiv", "archive"}
 JOB_SEGMENTS = {
     "ledige-stillinger", "stillinger", "stilling", "karriere", "career", "careers", "jobb", "jobs",
     "jobbe-hos-oss", "jobb-hos-oss", "rekruttering", "bli-med", "work-with-us", "ledig-stilling",
 }
 JOB_ANCHOR = re.compile(r"ledige?\s+stilling|karriere|jobb(e)?\s+(hos|i)\s|bli\s+med\s+på\s+laget|careers?\b|vacanc|job openings", re.I)
-JOB_PROBE_PATHS = ("/ledige-stillinger", "/karriere", "/jobb")
+JOB_PROBE_PATHS = ("/ledige-stillinger", "/karriere", "/jobb", "/jobbe-hos-oss", "/careers", "/jobs", "/en/careers")
+ABOUT_SEGMENTS = {"om-oss", "om", "about", "about-us", "selskapet", "company", "hvem-er-vi", "om-selskapet", "bedriften"}
+FETCH_CAPS.update({"news_probe": 6, "jobs_depth2": 2, "jobs_probe": len(JOB_PROBE_PATHS), "sitemap": 2})
 JOB_PLATFORMS = {
     "finn.no": re.compile(r"/job/|finnkode=", re.I),
     "webcruiter.no": re.compile(r"(advert|/job|AdvertId|ad\.aspx)", re.I),
@@ -645,6 +647,31 @@ def _sitemap_article_urls(fetcher: SiteFetcher, home_url: str) -> tuple[list[dic
     return dated, [loc for _, loc in sorted(urls, reverse=True)]
 
 
+def _sitemap_page_urls(fetcher: SiteFetcher, home_url: str, limit: int = 2000) -> list[str]:
+    """Same-site page URLs from /sitemap.xml (and its first page-type child sitemap)."""
+    origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlparse(home_url))
+    ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    page = fetcher.get(origin + "/sitemap.xml", "sitemap", accept="application/xml,text/xml")
+    try:
+        root = ET.fromstring(page["raw"]) if page else None
+    except ET.ParseError:
+        root = None
+    if root is None:
+        return []
+    children = [loc.text.strip() for loc in root.findall("s:sitemap/s:loc", ns) if loc.text]
+    if children:
+        pages = [c for c in children if re.search(r"page|side", c, re.I)] or children[:1]
+        page = fetcher.get(pages[0], "sitemap", accept="application/xml,text/xml")
+        try:
+            root = ET.fromstring(page["raw"]) if page else None
+        except ET.ParseError:
+            root = None
+        if root is None:
+            return []
+    urls = [(loc.text or "").strip() for loc in root.findall("s:url/s:loc", ns)][:limit]
+    return [u for u in urls if u and registered_domain(u) == fetcher.domain]
+
+
 def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: BeautifulSoup, extra_links: list[tuple[str, str]]) -> dict[str, Any]:
     domain = fetcher.domain
     links = _same_site_links(home["url"], home_soup, domain) + extra_links
@@ -666,8 +693,8 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
             break
         listing_page = None
     if listing_page is None and not articles and not feeds:
-        for path in NEWS_PROBE_PATHS[:2]:
-            probe = fetcher.get(urllib.parse.urljoin(home["url"], path), "news")
+        for path in NEWS_PROBE_PATHS:
+            probe = fetcher.get(urllib.parse.urljoin(home["url"], path), "news_probe")
             if _is_html(probe) and _news_index(_segments(probe["url"])) is not None:
                 listing_page = probe
                 break
@@ -861,17 +888,41 @@ def discover_jobs(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
 
     # A careers page counts only when the page itself names careers/jobs in a heading or its title.
     careers_page, heading = None, None
-    for url in candidates[:3]:
-        page = fetcher.get(url, "jobs")
-        if _is_html(page) and (heading := careers_heading(_soup(page))):
-            careers_page = page
-            break
+    tried: set[str] = set()
+
+    def try_candidates(urls: list[str], family: str, limit: int, probe: bool = False) -> tuple[dict[str, Any] | None, str | None]:
+        for url in [u for u in urls if u not in tried][:limit]:
+            tried.add(url)
+            page = fetcher.get(url, family)
+            # A blind probe must also land on a careers URL (not a redirect to the homepage).
+            if _is_html(page) and (not probe or _is_careers_url(page["url"])) and (found := careers_heading(_soup(page))):
+                return page, found
+        return None, None
+
+    careers_page, heading = try_candidates(candidates, "jobs", 3)
+    if careers_page is None:
+        # Depth 2: careers links often sit on an about/company page reached from the menu.
+        fetched = {page["url"].rstrip("/") for page in sources if page}
+        about = [u for u, _ in _same_site_links(home["url"], home_soup, domain)
+                 if any(s in ABOUT_SEGMENTS for s in _segments(u)[:2]) and u.rstrip("/") not in fetched]
+        about.sort(key=lambda u: (len(_segments(u)), u))
+        deeper: list[str] = []
+        for url in list(dict.fromkeys(about))[:2]:
+            page = fetcher.get(url, "jobs_depth2")
+            if _is_html(page):
+                deeper += [u for u, text in _same_site_links(page["url"], _soup(page), domain)
+                           if _is_careers_url(u, text) and u.rstrip("/") != home["url"].rstrip("/")]
+        deeper = sorted(dict.fromkeys(deeper), key=lambda u: (len(_segments(u)), u))
+        careers_page, heading = try_candidates(deeper, "jobs", 2)
+        candidates += deeper
+    if careers_page is None:
+        # The site's own sitemap lists careers pages that no menu links statically.
+        mapped = [u for u in _sitemap_page_urls(fetcher, home["url"]) if any(s in JOB_SEGMENTS for s in _segments(u)[:2])]
+        mapped.sort(key=lambda u: (len(_segments(u)), u))
+        careers_page, heading = try_candidates(mapped, "jobs", 2)
+        candidates += mapped
     if careers_page is None and not candidates:
-        for path in JOB_PROBE_PATHS[:2]:
-            probe = fetcher.get(urllib.parse.urljoin(home["url"], path), "jobs")
-            if _is_html(probe) and _is_careers_url(probe["url"]) and (heading := careers_heading(_soup(probe))):
-                careers_page = probe
-                break
+        careers_page, heading = try_candidates([urllib.parse.urljoin(home["url"], path) for path in JOB_PROBE_PATHS], "jobs_probe", len(JOB_PROBE_PATHS), probe=True)
 
     careers_ref = None
     if careers_page is not None:
