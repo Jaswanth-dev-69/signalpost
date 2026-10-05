@@ -259,3 +259,24 @@ financial figures, active roles and subunits found **0 disagreements** between t
   identity-gated `social_links` as the claims and empty when the site is not verified. There is no
   `linkedin` block and nothing `experimental`, because we never read LinkedIn. The placement question
   (envelope top level or inside `profile`) is Q13 in `QUESTIONS_FOR_BUILDERR.md`.
+
+## A5 Official-run checks and clean-clone smoke test (done)
+
+| Contract official-run check | Status | Where |
+|---|---|---|
+| Public artifact includes a 100-company smoke-test result or report | **Complete** | `docs/smoke-test/` (report, envelopes, input) |
+| Every official input produces exactly one terminal envelope | **Complete** | Validation in every run report. The deadline flush writes one envelope per company; unfinished modules are `budget_exhausted` |
+| No fabricated financial value or material wrong-company publication | **Complete, as far as we can measure** | Figures are verbatim Regnskapsregisteret fragments. precision_audit 100/100 with 0 wrong-company, red team 0/35, shared group/brand sites withdrawn |
+| Published material claims have source, retrieval time and reporting period where relevant | **Complete** | Every claim cites evidence (URL, time, hash, method, verbatim span); financial claims carry `reporting_period` and `effective_at` |
+| Missing values are never silently converted to zero | **Complete** | Smoke run: 0 non-available claims carrying a value |
+| Re-running the same snapshot is idempotent | **Complete** | A3: 50 companies run twice, 0 claim differences, 0 duplicates, 0 changes |
+| Refresh preserves prior evidence and exposes material changes | **Complete** | A3: `--previous` (defaults to the existing output), kit change shape, `refresh.prior_evidence`, `preserved_claims` |
+| Setup is reproducible with pinned dependencies and one evaluator command | **Complete** | `uv.lock`; `uv run signalpost ...`; clean clone passed |
+| Source rights, secrets and outbound URL policy documented and safe | **Complete (new doc)** | `docs/SOURCES_AND_SAFETY.md`. Gap fixed: site-claims fetches now also refuse subdomains that resolve to private addresses (`assert_public_url` in `SiteFetcher.get`) |
+
+- Clean clone: fresh clone at c052186, empty venv, `uv sync`, `uv run signalpost` on 100
+  companies. Result: 100/100 envelopes, exit 0, schema 0 errors.
+- Risk found: with no `--bulk`, downloading the 147 MB BRREG snapshot took **about 390 of 469 s**
+  on this connection. Builderr says it supplies the frozen snapshot, so this only matters if they
+  don't pass it (QUESTIONS Q11). The download sits inside the hard deadline, and every company still
+  gets an envelope.

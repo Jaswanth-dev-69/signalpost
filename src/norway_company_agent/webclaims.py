@@ -159,6 +159,9 @@ class SiteFetcher:
         self.budget[family] = self.budget.get(family, 0) + 1
         self.cache[url] = None
         try:
+            from .website import assert_public_url  # late import: website imports this module
+
+            assert_public_url(url)  # same domain, but a subdomain may still resolve to a private address
             if not robots_allowed(url, self.timeout):
                 self.errors.append({"url": url, "error": "robots.txt disallows page"})
                 return None

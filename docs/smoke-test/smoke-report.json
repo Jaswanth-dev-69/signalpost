@@ -1,0 +1,60 @@
+{
+  "run_id": "smoke-rev3",
+  "started_at": "2026-10-05T17:27:10.671581Z",
+  "completed_at": "2026-10-05T17:34:58.648644Z",
+  "expected_count": 100,
+  "emitted_envelopes": 100,
+  "modules": [
+    "registry",
+    "accounting_obligation",
+    "registry_live",
+    "financials",
+    "roles",
+    "group",
+    "locations",
+    "website"
+  ],
+  "registry": {
+    "registry_snapshot_sha256": "0b502cd50b8c99a408ea3cd2aa1bfc393c8affae8d0dd85889b97036c5884946",
+    "registry_rows_scanned": 1172017,
+    "requested": 100,
+    "selected": 100
+  },
+  "operations": {
+    "requests": 800,
+    "bytes": 36010208,
+    "nav_job_index": {
+      "active_ads": 12856,
+      "entries_fetched": 9705,
+      "closed_ads": 3151,
+      "errors": 0,
+      "http_429": 0,
+      "complete": true,
+      "employers_indexed": 6040,
+      "failed": null,
+      "companies_with_postings": 0
+    },
+    "p50_ms": 317,
+    "p95_ms": 2251,
+    "http_429_registry": 0,
+    "http_429_web": 0,
+    "wall_time_s": 468.2
+  },
+  "validation": {
+    "passed": true,
+    "checks": {
+      "exact_expected_count": true,
+      "unique_organisation_numbers": true,
+      "zero_silent_drops": true,
+      "all_terminal_status_completed": true,
+      "input_order_strictly_preserved": true
+    }
+  },
+  "refresh": {
+    "previous_envelopes": 0,
+    "compared": 0,
+    "material_changes": 0,
+    "companies_changed": 0
+  },
+  "errors": []
+}
