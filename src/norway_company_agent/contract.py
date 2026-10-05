@@ -3,12 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import urllib.parse
 from typing import Any
 
 from .nav_jobs import company_orgnrs
 
 BULK_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv"
-WEB_FIELDS = ("official_website", "company_description", "social_profiles", "dated_news", "job_postings")
+WEB_FIELDS = ("official_website", "company_description", "social_profile", "dated_news", "hiring_signal")
 FINANCIAL_FIELDS = (
     ("revenue", "revenue", "sumDriftsinntekter"),
     ("operating_result", "operating_result", "driftsresultat"),
@@ -16,6 +17,23 @@ FINANCIAL_FIELDS = (
     ("assets", "assets", "sumEiendeler"),
     ("debt", "debt", "sumGjeld"),
 )
+
+
+def social_profile_value(url: str) -> str:
+    """Canonical profile URL in the form Builderr matches (``facebook.com/handle``): https, no www,
+    no trailing slash, handle lowercased. Handles are case-insensitive on these platforms; YouTube
+    channel ids are not, so they keep their case."""
+    parsed = urllib.parse.urlparse(url)
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    path = parsed.path.rstrip("/")
+    if not (host.endswith("youtube.com") and path.lower().startswith("/channel/")):
+        path = path.lower()
+    return f"https://{host}{path}"
+
+
+def news_value(title: str, stamp: str) -> str:
+    """Dated news fact in Builderr's key form: "title (publication timestamp)"."""
+    return f"{' '.join(str(title).split())} ({stamp})"
 
 
 def _evidence_id(source_url: str, field_name: str, index: int) -> str:
@@ -431,7 +449,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
 
     # Hiring from NAV's public vacancy feed: exact employer organisation-number matches.
     nav = profile.get("nav_jobs") or {}
-    nav_items, nav_evs = [], []
+    nav_postings = []
     for item in nav.get("postings") or []:
         page = item.get("page_evidence") or {}
         if page:
@@ -439,16 +457,16 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         else:
             ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_span"), f"nav_{item['uuid']}")
         if ev:
-            nav_items.append({
+            nav_postings.append((item["url"], ev, {
+                "kind": "job_posting",
                 "title": item["title"],
-                "url": item["url"],
                 "posted_date": item.get("published"),
                 "valid_through": item.get("expires"),
                 "platform": "arbeidsplassen.nav.no",
                 "employer_orgnr": item["employer_orgnr"],
-                "source_page": page.get("url") or item.get("entry_url"),
-            })
-            nav_evs.append(ev)
+                "source_url": page.get("url") or item.get("entry_url"),
+                "verification_method": "nav_employer_orgnr",
+            }))
     sitemap = nav.get("sitemap") or {}
     nav_checked_ev = None
     if nav.get("index_complete") and sitemap:
@@ -458,26 +476,30 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
             "nav_sitemap",
         )
 
-    def add_job_claim(postings: list, job_evs: list, fallback_state: str, fallback_confidence: float, fallback_evs: list, site_method: str | None) -> None:
-        merged, evs, seen = [], [], set()
-        for item, ev in [*zip(postings, job_evs), *zip(nav_items, nav_evs)]:
-            key = (item.get("title", "").casefold(), item.get("url"))
-            if key in seen:
+    base_add_claim = add_claim
+
+    def add_hiring(careers: tuple | None, site_postings: list, fallback_state: str, fallback_confidence: float, fallback_evs: list, site_method: str | None, scale: float) -> None:
+        """One hiring_signal claim per fact: the careers page itself, then each posting."""
+        emitted: set[str] = set()
+        if careers:
+            url, ev, attrs = careers
+            claim = base_add_claim("hiring_signal", url, "available", round(0.9 * scale, 3), [ev])
+            claim.update({**attrs, "verification_method": site_method})
+            emitted.add(url.rstrip("/").casefold())
+        site_confidence = round(0.9 * scale, 3)
+        for url, ev, attrs in [*site_postings, *nav_postings]:
+            key = url.rstrip("/").casefold()
+            if key in emitted:
                 continue
-            seen.add(key)
-            merged.append(item)
-            evs.append(ev)
-        if merged:
-            site_confidence = 0.9 * (0.8 if site_method == "registry_declared_domain" else 1.0)
-            claim = add_claim_base("job_postings", merged[:25], "available", 0.95 if nav_items and not postings else site_confidence, evs[:25])
-            claim["verification_method"] = "nav_employer_orgnr" if nav_items and not postings else (site_method or "nav_employer_orgnr")
-        else:
+            emitted.add(key)
+            nav_item = attrs.get("platform") == "arbeidsplassen.nav.no"
+            claim = base_add_claim("hiring_signal", url, "available", 0.95 if nav_item else site_confidence, [ev])
+            claim.update(attrs if nav_item else {**attrs, "verification_method": site_method})
+        if not emitted:
             states_with_check = fallback_evs + ([nav_checked_ev] if nav_checked_ev and fallback_state == "not_available" else [])
-            claim = add_claim_base("job_postings", None, fallback_state, fallback_confidence, states_with_check)
+            claim = base_add_claim("hiring_signal", None, fallback_state, fallback_confidence, states_with_check)
             if site_method:
                 claim["verification_method"] = site_method
-
-    add_claim_base = add_claim
 
     method = (web_val.get("identity_assessment") or {}).get("method")
     declared = method == "registry_declared_domain"
@@ -487,7 +509,6 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         # Registry-declared domains (no on-page entity proof) carry lower confidence.
         scale = 0.8 if declared else 1.0
         verification = "registry_declared_domain" if declared else "on_page_entity_match"
-        base_add_claim = add_claim
 
         def add_claim(field, value, availability, confidence, ev_ids):  # noqa: F811
             claim = base_add_claim(field, value, availability, round(confidence * scale, 3), ev_ids)
@@ -522,49 +543,51 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         else:
             add_claim("company_description", None, "not_available", 0.6, [web_ev])
 
+        # Social profiles: one claim per profile, linked from a page of the verified site.
         web_claims = profile.get("web_claims") or {}
         socials = (web_claims.get("social") or {}).get("profiles") or web_val.get("social_links") or []
-        social_values, social_evs = [], []
+        social_seen: set[str] = set()
         for item in socials:
+            value = social_profile_value(item["url"])
+            if value in social_seen:
+                continue
             page = pages.get(item.get("found_on_page")) or {}
             source = item.get("found_on_page") or web_url
             page_hash = page.get("content_sha256") or (home_hash if source == web_url else None)
             page_time = page.get("retrieved_at") or (home_time if source == web_url else None)
-            ev = add_evidence(source, "company_owned", page_time, page_hash, f"{item.get('href') or item['url']}", f"social_{item['url']}")
+            ev = add_evidence(source, "company_owned", page_time, page_hash, f"{item.get('href') or item['url']}", f"social_{value}")
             if ev:
-                social_values.append({"platform": item["platform"], "url": item["url"], "found_on_page": source})
-                social_evs.append(ev)
-        if social_values:
-            add_claim("social_profiles", social_values, "available", 0.95, social_evs)
-        else:
-            add_claim("social_profiles", None, "not_available", 0.6, [web_ev])
+                social_seen.add(value)
+                add_claim("social_profile", value, "available", 0.95, [ev]).update({"platform": item["platform"], "source_url": source})
+        if not social_seen:
+            add_claim("social_profile", None, "not_available", 0.6, [web_ev])
 
+        # Dated news: one claim per article, keyed "title (publication timestamp)".
         news = web_claims.get("news") or {}
-        items, item_evs = [], []
+        news_count = 0
         for item in (news.get("items") or [])[:10]:
             ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"news_{item.get('url')}")
             if ev:
-                items.append({k: item.get(k) for k in ("title", "url", "published_date", "date_source", "source_page")})
-                item_evs.append(ev)
-        if items:
-            add_claim("dated_news", items, "available", 0.9, item_evs)
-        else:
+                stamp = item.get("published_at") or item.get("published_date")
+                claim = add_claim("dated_news", news_value(item["title"], stamp), "available", 0.9, [ev])
+                claim.update({"title": item["title"], "published_at": stamp, "url": item.get("url"), "date_source": item.get("date_source"), "source_url": item.get("source_page")})
+                news_count += 1
+        if not news_count:
             checked = [add_evidence(p.get("url"), "company_owned", p.get("retrieved_at"), p.get("content_sha256"), p.get("claim_span"), "news_checked") for p in news.get("checked_pages") or []]
             add_claim("dated_news", None, "failed" if deadline_hit else "not_available", 0.6, [*checked[:3], web_ev])
 
+        # Hiring signal: the careers page on the verified site, then each posting found there or on NAV.
         jobs = web_claims.get("jobs") or {}
-        postings, job_evs = [], []
+        site_postings = []
         for item in (jobs.get("postings") or [])[:25]:
             ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"job_{item.get('url')}")
             if ev:
-                postings.append({k: item.get(k) for k in ("title", "url", "posted_date", "platform", "source_page") if item.get(k)})
-                job_evs.append(ev)
+                attrs = {k: item.get(k) for k in ("title", "posted_date", "valid_through", "platform") if item.get(k)}
+                site_postings.append((item["url"], ev, {"kind": "job_posting", **attrs, "source_url": item.get("source_page")}))
         careers = jobs.get("careers_page") if isinstance(jobs.get("careers_page"), dict) else {}
         careers_ev = add_evidence(careers.get("url"), "company_owned", careers.get("retrieved_at"), careers.get("content_sha256"), careers.get("claim_span"), "careers_page") if careers else None
-        if careers_ev:
-            add_job_claim(postings, job_evs, "not_available", round(0.8 * scale, 3), [careers_ev], verification)
-        else:
-            add_job_claim(postings, job_evs, "failed" if deadline_hit else "not_available", round(0.6 * scale, 3), [web_ev], verification)
+        careers_fact = (careers["url"], careers_ev, {"kind": "careers_page", "source_url": careers["url"], "openings_listed": not careers.get("explicit_no_openings")}) if careers_ev else None
+        add_hiring(careers_fact, site_postings, "failed" if deadline_hit else "not_available", round(0.6 * scale, 3), [web_ev], verification, scale)
         return
 
     if web_status == "available":
@@ -582,7 +605,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
     else:
         state, evs = "not_available", [hjemmeside_ev or entity_ev]
     for field in WEB_FIELDS:
-        if field == "job_postings":
-            add_job_claim([], [], state, 0.3 if state == "ambiguous" else 0.0, evs, None)
+        if field == "hiring_signal":
+            add_hiring(None, [], state, 0.3 if state == "ambiguous" else 0.0, evs, None, 1.0)
             continue
         add_claim(field, None, state, 0.3 if state == "ambiguous" else 0.0, evs)

@@ -36,7 +36,20 @@ above 65. Branch `rev3`, cut from main at 0ded7110.
 - Open questions for Builderr are in `SCORER_NOTES.md` under UNKNOWN. Asked the user for the full
   per-family coverage table from the v2 email (website and description numbers would confirm H1).
 
+## Phase C
+
+- **C1 done.** One claim per fact: `social_profile` (canonical URL, handle lowercased except YouTube
+  channel ids), `hiring_signal` (careers page `available` when its heading names careers, then each
+  site or NAV posting), `dated_news` (`"Title (published_at)"` plus `title`/`published_at`/`url`).
+  Every claim has its own evidence and a claim-level `source_url`. `published_at` keeps the
+  source's own timestamp with its offset. Tests are in `tests/test_contract_rev3.py`. Reconcile 2/4
+  (MTM, Equinor); `web_claims_check` passes.
+  - Not done: a kit-style `profile` in the envelope. It is a duplicate representation and could
+    make the scorer pick up unverified data, so I left it out pending Builderr's answer to
+    UNKNOWN Q2.
+
 ## Next step
 
-C1: per-fact `social_profile` / `hiring_signal` / `dated_news` claims plus `legal_identity` and a
-kit-compatible `profile`, with unit tests built from the four named examples.
+C2: evidence flow. Spans must be verbatim text from the cited page (no `" | "` composites). News
+evidence moves to the article page with its own timestamp. Record the extraction method. Audit 100
+claims.

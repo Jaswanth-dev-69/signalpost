@@ -36,13 +36,13 @@ def evaluate_run(envelopes: list[dict[str, Any]], profiles: list[dict[str, Any]]
     # F1: Official Identity (legal_name, legal_form, municipality, industry_code, status_bankrupt)
     # F2: Financials (revenue, operating_result, annual_result, assets, debt, reporting_period)
     # F3: Roles & Subunits (registered_roles, registered_subunits)
-    # F4: Web Layer (official_website, company_description, social_profiles)
+    # F4: Web Layer (official_website, company_description, social_profile)
 
     family_fields = {
         "identity": ["legal_name", "legal_form", "municipality", "industry_code", "status_bankrupt"],
         "financials": ["revenue", "operating_result", "annual_result", "assets", "debt", "reporting_period"],
         "roles_locations": ["registered_roles", "registered_subunits"],
-        "web_layer": ["official_website", "company_description", "social_profiles"],
+        "web_layer": ["official_website", "company_description", "social_profile"],
     }
 
     family_company_coverage = {}

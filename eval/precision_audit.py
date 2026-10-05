@@ -2,9 +2,9 @@
 """Audits precision by sampling claims, re-fetching the cited source live, and verifying fact
 support and entity attribution.
 
-Web list claims (social_profiles, dated_news, job_postings) are verified item by item against the
-page each item cites: the social link's href, the news title plus its quoted date, or the job
-title/URL must be present on that page. A company website that prints another company's
+Web fact claims (social_profile, dated_news, hiring_signal; one claim per fact) are verified against
+the page each claim cites: the social link's href, the news title plus its quoted date, the careers
+page heading, or the job title/URL must be present on that page. A company website that prints another company's
 organisation number and not this company's is a WRONG_COMPANY verdict.
 
 Usage: python eval/precision_audit.py <envelopes.jsonl> [audit.csv] [sample_size] [seed]
@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from norway_company_agent.identity import org_numbers_in_text  # noqa: E402
 
 socket.setdefaulttimeout(10.0)
-WEB_LIST_FIELDS = {"social_profiles", "dated_news", "job_postings"}
+WEB_FACT_FIELDS = {"social_profile", "dated_news", "hiring_signal"}
 
 
 def fetch_url(url: str, timeout: float = 10.0) -> tuple[int, str]:
@@ -81,7 +81,7 @@ def item_evidence(claim: dict, item: dict, ev_map: dict) -> dict | None:
 
 
 def verify_web_item(field: str, item: dict, ev: dict, raw: str) -> tuple[bool, str]:
-    if field == "social_profiles":
+    if field == "social_profile":
         handle = item["url"].split(".com/", 1)[-1].strip("/")
         span = ev.get("claim_span", "")
         ok = present(span, raw) or (handle and handle.casefold() in raw.casefold())
@@ -92,7 +92,10 @@ def verify_web_item(field: str, item: dict, ev: dict, raw: str) -> tuple[bool, s
         date_ok = present(raw_date, raw) or raw_date.casefold() in raw.casefold()
         ok = title_ok and date_ok
         return ok, "" if ok else f"title_ok={title_ok} date_ok={date_ok} ({raw_date[:30]})"
-    if field == "job_postings":
+    if field == "hiring_signal" and item.get("kind") == "careers_page":
+        ok = present(ev.get("claim_span", "")[:120], raw)
+        return ok, "" if ok else "careers heading not on the careers page"
+    if field == "hiring_signal":
         ok = present(item.get("title", "")[:80], raw) or (item.get("url") and item["url"] in html.unescape(raw))
         return bool(ok), "" if ok else "job title/url not on cited page"
     return False, "unknown web field"
@@ -130,8 +133,8 @@ def run_precision_audit(envelopes_path: Path, output_csv_path: Path, sample_size
         org, claim, ev_map = entry["org"], entry["claim"], entry["ev_map"]
         field, val = claim["field"], claim["value"]
         item = None
-        if field in WEB_LIST_FIELDS and isinstance(val, list):
-            item = rng.choice(val)
+        if field in WEB_FACT_FIELDS:
+            item = {**claim, "url": claim.get("url") or val, "source_page": claim.get("source_url")}
             ev = item_evidence(claim, item, ev_map)
         else:
             ev = ev_map.get(claim["evidence_ids"][-1] if field == "official_website" else claim["evidence_ids"][0])

@@ -232,6 +232,27 @@ def parse_rfc822(text: str | None) -> str | None:
         return parse_iso(text)
 
 
+def published_at(raw: str | None, iso_date: str) -> str:
+    """The source's own publication timestamp as ISO 8601 with its UTC offset, or the date when the
+    source states only a date. Builderr keys dated news as "title (timestamp)"."""
+    text = str(raw or "").strip()
+    if re.match(r"20\d{2}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}", text):
+        try:
+            value = datetime.fromisoformat(text.replace(" ", "T", 1))
+            if value.date().isoformat() == iso_date:
+                return value.isoformat()
+        except ValueError:
+            pass
+    elif re.search(r"\d{1,2}:\d{2}", text) and not re.match(r"20\d{2}-", text):
+        try:  # RFC 822 feed dates, e.g. "Mon, 22 Sep 2025 20:00:00 +0200"
+            value = parsedate_to_datetime(text)
+            if value.date().isoformat() == iso_date:
+                return value.isoformat()
+        except (TypeError, ValueError, IndexError):
+            pass
+    return iso_date
+
+
 def parse_norwegian_text_date(text: str) -> tuple[str, str] | None:
     """Return (iso_date, quoted_text) for the first Norwegian or numeric date in text."""
     match = NO_DATE_TEXT.search(text)
@@ -426,6 +447,7 @@ def parse_feed(page: dict[str, Any], domain: str) -> list[dict[str, Any]]:
             "title": " ".join(title.split())[:300],
             "url": link,
             "published_date": iso,
+            "published_at": published_at(raw_date, iso),
             "date_source": method,
             "source_page": page["url"],
             "content_sha256": page["content_sha256"],
@@ -466,6 +488,7 @@ def _listing_inline_items(listing: dict[str, Any], soup: BeautifulSoup, domain: 
             "title": title,
             "url": url,
             "published_date": found[0],
+            "published_at": published_at(found[1], found[0]),
             "date_source": found[2],
             "source_page": listing["url"],
             "content_sha256": listing["content_sha256"],
@@ -490,7 +513,8 @@ def _jsonld_article_items(page: dict[str, Any], soup: BeautifulSoup, domain: str
         if registered_domain(url) != domain or url.rstrip("/") == page["url"].rstrip("/"):
             continue  # the page's own date belongs to the page, not to a listed item
         items.append({
-            "title": title, "url": url, "published_date": published, "date_source": "jsonld_list_datePublished",
+            "title": title, "url": url, "published_date": published, "published_at": published_at(node.get("datePublished"), published),
+            "date_source": "jsonld_list_datePublished",
             "source_page": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
             "claim_span": f"{title[:200]} | {node.get('datePublished')}",
         })
@@ -514,7 +538,8 @@ def _wordpress_posts(fetcher: SiteFetcher, home: dict[str, Any], domain: str) ->
         published = parse_iso(post.get("date"))
         if title and link and published and registered_domain(link) == domain:
             items.append({
-                "title": title, "url": link, "published_date": published, "date_source": "wordpress_rest_date",
+                "title": title, "url": link, "published_date": published, "published_at": published_at(post.get("date"), published),
+                "date_source": "wordpress_rest_date",
                 "source_page": page["url"], "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
                 "claim_span": f"{title[:200]} | {post.get('date')}",
             })
@@ -552,7 +577,7 @@ def _sitemap_article_urls(fetcher: SiteFetcher, home_url: str) -> tuple[list[dic
         title = node.findtext("n:news/n:title", default="", namespaces=ns)
         if loc and pub and title and parse_iso(pub):
             dated.append({
-                "title": " ".join(title.split())[:300], "url": loc, "published_date": parse_iso(pub),
+                "title": " ".join(title.split())[:300], "url": loc, "published_date": parse_iso(pub), "published_at": published_at(pub, parse_iso(pub)),
                 "date_source": "news_sitemap_publication_date", "source_page": page["url"],
                 "content_sha256": page["content_sha256"], "retrieved_at": page["retrieved_at"],
                 "claim_span": f"{' '.join(title.split())[:200]} | {pub.strip()}",
@@ -662,6 +687,7 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
             "title": title,
             "url": page["url"],
             "published_date": found[0],
+            "published_at": published_at(found[1], found[0]),
             "date_source": found[2],
             "source_page": page["url"],
             "content_sha256": page["content_sha256"],
@@ -691,6 +717,18 @@ def _platform_posting(url: str) -> str | None:
     for domain, pattern in JOB_PLATFORMS.items():
         if (host == domain or host.endswith("." + domain)) and pattern.search(url):
             return domain
+    return None
+
+
+CAREERS_TEXT = re.compile(r"ledige?\s+stilling|stillinger|karriere|jobb|careers?\b|\bjobs?\b|rekrutter|vacanc|arbeide?\s+(hos|i|for)\s", re.I)
+
+
+def careers_heading(soup: BeautifulSoup) -> str | None:
+    """Verbatim heading or title that names the page as the company's careers/jobs page."""
+    for node in [*soup.select("h1"), *soup.select("title"), *soup.select("h2")[:6]]:
+        text = " ".join(node.get_text(" ", strip=True).split())
+        if 3 <= len(text) <= 200 and CAREERS_TEXT.search(text):
+            return text
     return None
 
 
@@ -766,16 +804,17 @@ def discover_jobs(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
     # Shallowest careers URL first: the index page, not an individual posting.
     candidates.sort(key=lambda u: (len(_segments(u)), u))
 
-    careers_page = None
-    for url in candidates[:2]:
+    # A careers page counts only when the page itself names careers/jobs in a heading or its title.
+    careers_page, heading = None, None
+    for url in candidates[:3]:
         page = fetcher.get(url, "jobs")
-        if _is_html(page):
+        if _is_html(page) and (heading := careers_heading(_soup(page))):
             careers_page = page
             break
     if careers_page is None and not candidates:
         for path in JOB_PROBE_PATHS[:2]:
             probe = fetcher.get(urllib.parse.urljoin(home["url"], path), "jobs")
-            if _is_html(probe) and _is_careers_url(probe["url"]) and re.search(r"stilling|karriere|jobb|career|job", (_title(_soup(probe)) or ""), re.I):
+            if _is_html(probe) and _is_careers_url(probe["url"]) and (heading := careers_heading(_soup(probe))):
                 careers_page = probe
                 break
 
@@ -817,8 +856,12 @@ def discover_jobs(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
                 })
         text = " ".join(soup.get_text(" ", strip=True).split())
         no_openings = NO_OPENINGS.search(text)
-        span = no_openings.group(0).strip() if no_openings else (_title(soup) + " | " + text[:200])
-        careers_ref = {**_page_ref(careers_page), "claim_span": span, "explicit_no_openings": bool(no_openings)}
+        careers_ref = {
+            **_page_ref(careers_page),
+            "claim_span": heading,
+            "explicit_no_openings": bool(no_openings),
+            "no_openings_span": no_openings.group(0).strip() if no_openings else None,
+        }
 
     return {"postings": list(postings.values())[:MAX_JOB_POSTINGS], "careers_page": careers_ref}
 

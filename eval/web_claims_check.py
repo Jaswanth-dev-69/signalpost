@@ -41,8 +41,13 @@ def main() -> int:
         rows = {json.loads(line)["organisation_number"]: json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()}
         assert set(rows) == set(CASES), f"expected exactly {CASES}, got {sorted(rows)}"
 
+        def claims(org: str, field: str) -> list[dict]:
+            found = [c for c in rows[org]["claims"] if c["field"] == field]
+            assert found, (org, field)
+            return found
+
         def claim(org: str, field: str) -> dict:
-            return next(c for c in rows[org]["claims"] if c["field"] == field)
+            return claims(org, field)[0]
 
         def check_evidence(org: str, item: dict) -> None:
             evidence = {e["id"]: e for e in rows[org]["evidence"]}
@@ -51,35 +56,35 @@ def main() -> int:
                 ev = evidence[eid]
                 assert len(ev["content_sha256"]) == 64 and ev["claim_span"].strip() and ev["retrieved_at"], ev
 
+        # One claim per fact; every available claim has a scalar value and its own evidence.
+        for org in CASES:
+            for c in rows[org]["claims"]:
+                if c["field"] in ("social_profile", "dated_news", "hiring_signal") and c["availability"] == "available":
+                    assert isinstance(c["value"], str) and c["value"], c
+                    check_evidence(org, c)
+
         # 811730912: Facebook and Instagram linked from its own verified website.
-        social = claim("811730912", "social_profiles")
-        social_urls = {item["url"] for item in (social["value"] or [])}
-        assert social["availability"] == "available", social
-        assert any("facebook.com" in url for url in social_urls), social_urls
+        social = [c for c in claims("811730912", "social_profile") if c["availability"] == "available"]
+        social_urls = {c["value"] for c in social}
+        assert "https://facebook.com/mtmskogservice" in social_urls, social_urls
         assert any("instagram.com" in url for url in social_urls), social_urls
-        check_evidence("811730912", social)
+        assert all(c.get("source_url") for c in social), social
 
         # 813396092: registry-declared bori.no; dated items from the bori.no/aktuelt news section.
-        news = claim("813396092", "dated_news")
-        assert news["availability"] == "available", news
-        assert news.get("verification_method") == "registry_declared_domain", news
-        dated = [i for i in news["value"] if i.get("published_date") and i.get("url") and i.get("title")]
-        assert dated, news
-        assert any("bori.no" in i["url"] and "/aktuelt" in i["url"] for i in dated), news
-        check_evidence("813396092", news)
+        news = [c for c in claims("813396092", "dated_news") if c["availability"] == "available"]
+        assert news, claims("813396092", "dated_news")
+        assert all(c.get("verification_method") == "registry_declared_domain" for c in news), news
+        assert all(c["value"] == f"{c['title']} ({c['published_at']})" and c.get("url") for c in news), news
+        assert any("bori.no" in c["url"] and "/aktuelt" in c["url"] for c in news), news
         site = claim("813396092", "official_website")
         site_sources = {e["id"]: e["source_url"] for e in rows["813396092"]["evidence"]}
         assert any("data.brreg.no" in site_sources[e] for e in site["evidence_ids"]), site
 
-        # 838797172: postings, or an explicit not_available backed by granne.no/ledige-stillinger.
-        jobs = claim("838797172", "job_postings")
-        if jobs["availability"] == "available":
-            assert any(item.get("title") and item.get("url") for item in jobs["value"]), jobs
-        else:
-            assert jobs["availability"] == "not_available", jobs
-            evidence = {item["id"]: item for item in rows["838797172"]["evidence"]}
-            assert any("granne.no/ledige-stillinger" in evidence[eid]["source_url"] for eid in jobs["evidence_ids"]), jobs
-        check_evidence("838797172", jobs)
+        # 838797172: the granne.no careers page is itself the hiring signal, plus any postings.
+        hiring = [c for c in claims("838797172", "hiring_signal") if c["availability"] == "available"]
+        careers = [c for c in hiring if c.get("kind") == "careers_page"]
+        assert careers and "granne.no/ledige-stillinger" in careers[0]["value"], claims("838797172", "hiring_signal")
+        assert all(c.get("title") for c in hiring if c.get("kind") == "job_posting"), hiring
 
         print("web_claims_check: PASS")
         return 0
