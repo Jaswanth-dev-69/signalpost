@@ -61,3 +61,17 @@ Each question names the exact choice it decides for us. A one-word answer is eno
     source_url}]}` built only from site-linked, identity-gated links. We never read LinkedIn, so there
     is no `linkedin` block. Does the scorer read `external.handles`, and is the envelope's top level the
     right place (or inside `profile`)?
+
+## F. Group sites and shared domains (rev4 calibration)
+
+14. **How are group-site websites scored, and may we publish them with a relationship label?** Your
+    v2 feedback lists `elopak.com` as ELOPAK ASA's website. In Enhetsregisteret that domain is the
+    declared homepage of 2 entities, and the homepage is a JavaScript shell, so on-page identity cannot
+    be shown. v3 withholds a registry-declared domain declared by 2 or more entities (labelled
+    `shared_group_brand_or_provider_site`), because some are provider sites (one domain declared by
+    663 housing entities) or franchise sites. In your sample, 16 websites sit on such shared domains.
+    Your crawler and v3 agree on all 13 your gate marks exact, except 3 we miss for unrelated reasons
+    (timeout, no registry homepage, a single-token name). The shared rule decides only 3 cases, all of
+    which your own gate marks non-exact. Should a shared or group domain count for (a) the group's top
+    entity only, (b) every declarant, or (c) none, and is publishing it with `relationship:
+    group_site` acceptable?
