@@ -224,3 +224,26 @@ financial figures, active roles and subunits found **0 disagreements** between t
   `registry_declared_assessment`. It now also sits in the kit's `identity_assessment`
   (`publishable:false`, `relationship: shared_group_brand_or_provider_site`, `declaring_entities`),
   and the kit `status` is kept. Re-check: 24/24 labelled.
+
+## A3 Determinism and refresh (done)
+
+- **Determinism.** The same 50 proxy companies were run twice back to back from a frozen worktree.
+  The two runs had the same membership, no duplicate evidence ids, claims or change events, and 44/50
+  envelopes were identical after dropping timestamps, run ids and counters. In the other 6, every
+  difference was in the bytes the sites served: 106 content hashes, plus a "Menu" label and a
+  cookie-policy sentence that appeared in one response and not the other. No claim value differed.
+  Nothing in our ordering or concurrency was nondeterministic, so there was nothing to fix.
+- **Refresh** (`src/norway_company_agent/envelope_refresh.py`; the kit's `refresh.py` is unchanged).
+  The new `--previous <envelopes.jsonl>` option defaults to the existing `--output` file, so
+  running twice into the same path refreshes. Change events use the kit's `diff_profile` shape for
+  the kit-tracked profile fields, plus the same keys with `change_type: added|removed` for external
+  claims (`claims.official_website|social_profile|dated_news|hiring_signal|company_description`).
+  Values are compared, never hashes or times. A source that failed this run is never reported as
+  changed or erased: its previous claims go to `refresh.preserved_claims` and the field is listed in
+  `fields_not_refreshed`. Evidence not re-observed is kept in `refresh.prior_evidence` across
+  refreshes, capped at 300. The run report has a `refresh` block.
+- End to end, 20 companies run twice into one output file: run 2 compared 20, found **0 material
+  changes** and no duplicates, and carried 4 prior evidence items (pages whose bytes changed). The same
+  logic applied to the 50-company pair also gives 0 changes. Unit tests cover: same snapshot gives no
+  changes; a new filing gives one kit-shaped change and keeps the old evidence; a failed website fetch
+  is preserved, not reported as removed; a new article gives an `added` event.

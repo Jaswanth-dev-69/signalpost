@@ -222,5 +222,57 @@ class SharedDeclaredDomain(unittest.TestCase):
         self.assertFalse(self.assessment(None)["publishable"])
 
 
+class Refresh(unittest.TestCase):
+    def pair(self, mutate=None):
+        import copy
+        from norway_company_agent.envelope_refresh import refresh_envelope
+        news = [{"title": "Ny avtale", "published_at": "2025-09-22T20:00:00+02:00", "url": "https://ex.no/nyheter/a",
+                 "source_page": "https://ex.no/nyheter/a", "retrieved_at": T, "content_sha256": HASH_PAGE, "claim_span": "Ny avtale"}]
+        before = verified_profile("923609016", "EXAMPLE ASA", "https://ex.no/", news=news)
+        before["evidence"]["financials"] = {"status": "available", "source_url": "https://data.brreg.no/regnskapsregisteret/regnskap/923609016",
+                                            "retrieved_at": T, "content_sha256": "d" * 64, "value": {"records": [{"revenue": 10.0, "period": {"fraDato": "2025-01-01", "tilDato": "2025-12-31"}}]}}
+        after = copy.deepcopy(before)
+        if mutate:
+            mutate(after)
+        old = profile_to_contract_envelope(before, run_id="run-1", started_at=T, completed_at=T)
+        new = profile_to_contract_envelope(after, run_id="run-2", started_at=T, completed_at=T)
+        return refresh_envelope(new, old)
+
+    def test_same_snapshot_gives_no_changes_and_no_duplicates(self):
+        env = self.pair()
+        self.assertEqual(env["changes"], [])
+        self.assertEqual(env["refresh"]["previous_run_id"], "run-1")
+        self.assertEqual(env["refresh"]["prior_evidence"], [])
+
+    def test_new_filing_is_one_kit_shaped_change_and_old_evidence_is_kept(self):
+        def mutate(p):
+            p["evidence"]["financials"]["value"]["records"][0]["revenue"] = 12.0
+            p["evidence"]["financials"]["content_sha256"] = "e" * 64
+        env = self.pair(mutate)
+        fields = [c["field"] for c in env["changes"]]
+        self.assertIn("financials.records", fields)
+        change = next(c for c in env["changes"] if c["field"] == "financials.records")
+        self.assertEqual((change["old_content_sha256"], change["new_content_sha256"]), ("d" * 64, "e" * 64))
+        self.assertTrue(any(e["content_sha256"] == "d" * 64 for e in env["refresh"]["prior_evidence"]))
+
+    def test_failed_website_fetch_is_preserved_not_reported_as_removed(self):
+        def mutate(p):
+            p["evidence"]["website"] = {"status": "source_error", "source_url": "https://ex.no/", "retrieved_at": T, "note": "timeout"}
+            p["web_claims"] = {}
+        env = self.pair(mutate)
+        self.assertEqual(env["changes"], [])
+        self.assertIn("website", env["refresh"]["fields_not_refreshed"])
+        self.assertTrue(any(c["field"] == "official_website" for c in env["refresh"]["preserved_claims"]))
+
+    def test_new_article_is_an_added_claim_event(self):
+        def mutate(p):
+            p["web_claims"]["news"]["items"].append({"title": "Nytt bygg", "published_at": "2025-10-01T09:00:00+02:00", "url": "https://ex.no/nyheter/b",
+                                                     "source_page": "https://ex.no/nyheter/b", "retrieved_at": T, "content_sha256": HASH_PAGE, "claim_span": "Nytt bygg"})
+        env = self.pair(mutate)
+        added = [c for c in env["changes"] if c["field"] == "claims.dated_news"]
+        self.assertEqual(len(added), 1)
+        self.assertEqual((added[0]["change_type"], added[0]["effective_at"]), ("added", "2025-10-01T09:00:00+02:00"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,6 +33,7 @@ sys.path.insert(1, str(ROOT))  # scripts.build_prototype, whatever the entry poi
 
 from norway_company_agent.batch import declared_domain_counts, profile_complete_for_modules, profiles_from_bulk, read_organisation_inputs, validate_envelopes  # noqa: E402
 from norway_company_agent.contract import profile_to_contract_envelope  # noqa: E402
+from norway_company_agent.envelope_refresh import read_previous, refresh_envelopes  # noqa: E402
 from norway_company_agent.discovery import choose_search_candidate  # noqa: E402
 from norway_company_agent.domain_solver import discover_website_by_domain_search  # noqa: E402
 from norway_company_agent.evidence import utc_now  # noqa: E402
@@ -262,6 +263,7 @@ def main() -> None:
     parser.add_argument("--disable-discovery", action="store_true", help="Disable domain candidate discovery for missing websites")
     parser.add_argument("--disable-nav-jobs", action="store_true", help="Do not read NAV's public vacancy feed")
     parser.add_argument("--nav-workers", type=int, default=24, help="Concurrent connections for the NAV vacancy feed index")
+    parser.add_argument("--previous", help="Previous run's envelopes for refresh (default: the existing --output file, if any)")
     args = parser.parse_args()
 
     # The hard deadline counts total wall time from process start, including a cold bulk download.
@@ -286,6 +288,10 @@ def main() -> None:
     state: dict[str, dict] = {}
     errors: list[dict] = []
     output_path = Path(args.output)
+    # Refresh baseline: read before anything overwrites the output file.
+    previous_envelopes = read_previous(args.previous or output_path)
+    if previous_envelopes:
+        print(f"[{utc_now()}] Refresh: {len(previous_envelopes)} previous envelopes from {args.previous or output_path}", flush=True)
 
     import threading
 
@@ -316,6 +322,7 @@ def main() -> None:
                     env = profile_to_contract_envelope(prof, run_id=args.run_id, started_at=started_at, completed_at=completed, terminal_status="completed")
                 final_profiles.append(prof)
                 envs.append(env)
+            refresh_envelopes(envs, previous_envelopes)
             write_jsonl(output_path, envs)
             write_jsonl(
                 Path(args.profiles_output) if args.profiles_output else output_path.with_suffix(".profiles.jsonl"),
@@ -444,6 +451,8 @@ def main() -> None:
         )
         for prof in ordered_profiles
     ]
+    refresh_stats = refresh_envelopes(envelopes, previous_envelopes)
+    print(f"[{utc_now()}] Refresh: {json.dumps(refresh_stats)}", flush=True)
 
     profiles_output_path = Path(args.profiles_output) if args.profiles_output else output_path.with_suffix(".profiles.jsonl")
     report_path = Path(args.report) if args.report else output_path.with_suffix(".report.json")
@@ -486,6 +495,7 @@ def main() -> None:
         "registry": registry_metadata,
         "operations": operations,
         "validation": {"passed": all(validation.values()), "checks": validation},
+        "refresh": {"previous_envelopes": len(previous_envelopes), **refresh_stats},
         "errors": errors,
     }
 
