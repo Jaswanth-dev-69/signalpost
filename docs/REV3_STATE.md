@@ -209,3 +209,18 @@ kit's `refresh.diff_profile` shape. Then walk the official-run checks one by one
   hashes of `usbl.no` (shared by both companies), whose bytes change per request while the
   extracted text is identical. No duplicate evidence ids, claims or changes. New tool:
   `eval/determinism.py`.
+
+## A2 Profile vs claims consistency (done)
+
+On proxy-200 (200 envelopes), checks of website state and domain, the social set, the five
+financial figures, active roles and subunits found **0 disagreements** between the kit-shaped
+`profile` and our claims.
+
+- Websites: 44 published, where the claim is `available` and the profile has `publishable:true` with
+  the same domain. 30 loaded but non-exact, where the claim is `ambiguous` and the profile has
+  `publishable:false` with the kit's status (`review` / `related_or_uncertain`). 126 not loaded
+  (`not_available` / `blocked` / `failed`).
+- 24 of the 30 non-exact sites are shared declared domains. Their label used to sit only in
+  `registry_declared_assessment`. It now also sits in the kit's `identity_assessment`
+  (`publishable:false`, `relationship: shared_group_brand_or_provider_site`, `declaring_entities`),
+  and the kit `status` is kept. Re-check: 24/24 labelled.

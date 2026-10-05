@@ -206,6 +206,18 @@ class SharedDeclaredDomain(unittest.TestCase):
         self.assertFalse(result["publishable"])
         self.assertEqual(result["relationship"], "shared_group_brand_or_provider_site")
 
+    def test_gate_labels_the_shared_site_in_the_identity_verdict(self):
+        from norway_company_agent.identity import apply_registry_declared_gate
+        profile = {"organisation_number": "999999999", "name": "EXAMPLE FUND", "website": "www.group.no",
+                   "homepage_domain_registry_entities": 13}
+        website = {"status": "available", "source_url": "https://www.group.no/", "value": {
+            "final_url": "https://www.group.no/", "title": "Group", "main_text_excerpt": "x" * 200,
+            "identity_assessment": {"status": "related_or_uncertain", "publishable": False}}}
+        self.assertFalse(apply_registry_declared_gate(profile, website))
+        verdict = website["value"]["identity_assessment"]
+        self.assertEqual((verdict["publishable"], verdict["relationship"], verdict["status"]),
+                         (False, "shared_group_brand_or_provider_site", "related_or_uncertain"))
+
     def test_unknown_count_is_not_published(self):
         self.assertFalse(self.assessment(None)["publishable"])
 

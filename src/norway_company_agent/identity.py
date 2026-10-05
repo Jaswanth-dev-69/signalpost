@@ -304,6 +304,10 @@ def apply_registry_declared_gate(profile: dict[str, Any], website: dict[str, Any
         return False
     assessment = registry_declared_assessment(profile, website)
     value["registry_declared_assessment"] = assessment
+    if assessment.get("relationship"):
+        # Label the shared site where the kit's own identity verdict sits (publishable stays false).
+        value["identity_assessment"] = {**(value.get("identity_assessment") or {}), "publishable": False,
+                                        "relationship": assessment["relationship"], "declaring_entities": assessment.get("declaring_entities")}
     if not assessment["publishable"]:
         return False
     value["identity_assessment"] = {
