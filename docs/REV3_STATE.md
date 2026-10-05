@@ -368,3 +368,31 @@ Options that need your decision (not done):
   hard deadline; NAV completes earlier. At 3,000 companies, pass 1 ends at about 320 s and the web
   pass stops starting new companies at 1,410 s, so about 1,980 companies get web research. Every
   company still gets an envelope.
+
+## H5 Final checks (done, commit 9bc2336 code)
+
+The first determinism pair on 1857b31 found two false changes and one duplicate. All three are
+fixed in 9bc2336:
+
+- A news article whose fetch timed out in run 1 showed up as "added" in run 2. A careers page cut
+  by the per-company web budget under load (3/3 found when run alone) showed up as "removed". Now
+  the crawl records budget cuts (`crawl_complete`, plus a crawl error). Refresh never reports a
+  removal from an incomplete crawl, or for a page that errored this run (the claim is preserved).
+  It never reports an addition when the previous crawl was incomplete or that page errored before
+  (it is recorded as `newly_observed`). Articles dropping off a listing are `no_longer_listed`, not
+  changes.
+- Two event pages with the same title and timestamp gave the same `dated_news` value twice. Now
+  there is one claim per value.
+
+Results on the final code (proxy-200 run twice into the same output, 261 s and 263 s):
+
+| Check | Result |
+|---|---|
+| Unit tests | 139 passed |
+| Schema validator | 0 errors, 200/200 envelopes |
+| Determinism (run 1 vs run 2) | 173/200 identical; the other 27 differ only in page bytes (281 hashes, 4 NAV entry times, 3 text excerpts, 1 crawl-error list). **0 duplicates, 0 change events**, 0 unconfirmed differences, 0 incomplete crawls |
+| Refresh (run 2 on run 1) | 200 compared, 0 material changes, 0 failed |
+| precision_audit (100 claims) | **100/100 supported, 0 wrong-company**, 20/20 web spans on the page. The earlier 98/100 was one transient connection failure (status 0) on eplast.no, which loads 4/4 on retry |
+| evidence_audit (100 claims) | 153/153 URLs load, 99.3% spans verbatim, 80.4% hashes identical on re-fetch |
+| Red team | 35 high-risk companies, **0 false positives** |
+| Family coverage (proxy-200) | website 44, description 41, social 22, news 23, hiring 16 (unchanged) |
