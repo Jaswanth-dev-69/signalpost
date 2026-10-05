@@ -280,3 +280,30 @@ financial figures, active roles and subunits found **0 disagreements** between t
   on this connection. Builderr says it supplies the frozen snapshot, so this only matters if they
   don't pass it (QUESTIONS Q11). The download sits inside the hard deadline, and every company still
   gets an envelope.
+
+# Part B: website discovery beyond the registry (measured; no change shipped)
+
+Proxy-200 baseline (rev3, commit 9bcfcb8 run): 125 companies have no registry homepage. Domain
+discovery (registry email domain, then legal-name slugs) verified a site for **9 of 125 (7.2%)**,
+using about 3.8 candidates per company. Total wall time is 267 s, against 261 s for v2.
+
+Diagnosis of the 156 companies still without a verified site (every candidate re-fetched):
+
+| Route tried | Result |
+|---|---|
+| Existing candidates | 42/156 have a usable email domain. 69 candidates load but fail the strict proof; 546 do not resolve or error |
+| The 69 loaded-but-unproven candidates | Mostly group, brand or provider sites (klp.no, storebrand.no, kongsberg.com, ragde.no), parked or for-sale pages, or homonyms. 9 print a different organisation number (correctly rejected). A handful look right but give no proof |
+| 12 extra proof paths (`/kontakt`, `/om-oss`, `/personvern`, `/salgsbetingelser`, `/contact`, `/about`, ...), robots-aware, unchanged gate | **0 / 60** new proofs |
+| Subunit-declared homepages (`underenheter.hjemmeside`) as candidates | 3 / 116 companies have one; **0** pass the strict proof (1 no proof, 2 do not resolve) |
+| Postal place accepted in place of municipality (a **gate change**, measured only) | 4 / 60 candidates would pass; realistically 1–2 companies (one is caught by the homonym check, one rests on the 2-letter token "OS") |
+
+Conclusion: without loosening the entity gate and without a search API (not permitted here: it needs
+a personal key), there is no measured way on proxy-200 to raise website coverage beyond the registry.
+Builderr's crawler likely finds its extra sites through search (the kit ships
+`run_brave_discovery.py`). Nothing was changed, so wall time is unchanged.
+
+Options that need your decision (not done):
+1. Accept the registered postal place as a locality alongside the municipality, keeping the homonym
+   check and a minimum of 3 characters: +0.5–1% website coverage on proxy-200, at a small risk.
+2. A search-API candidate source, if Builderr supplies a key (contract: "if you need a model key …
+   ask and we will supply one"; search would need the same arrangement).
