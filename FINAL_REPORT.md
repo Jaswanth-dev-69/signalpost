@@ -106,7 +106,7 @@ All official competition requirements from `OUTPUT_CONTRACT.md`, `full brief.md`
 
 - **Run Command:**
   ```bash
-  uv run python run_agent.py --organisations <path_to_input> --output <path_to_envelopes.jsonl>
+  uv run signalpost --organisations <path_to_input> --output <path_to_envelopes.jsonl>   # same as: uv run python run_agent.py ...
   ```
   *(Accepts `.json`, `.jsonl`, or `.txt` containing organisation numbers; automatically generates profiles, run report, and responsive HTML viewer)*
 

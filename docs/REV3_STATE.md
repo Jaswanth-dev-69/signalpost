@@ -190,3 +190,22 @@ is clean, and wall time matches v2. The Phase-1 gate is passed.
 Phase 2: run the same 50 companies twice back to back (determinism, false changes, duplicates). Add a
 previous-envelopes input for refresh: preserve prior evidence and emit typed material changes with the
 kit's `refresh.diff_profile` shape. Then walk the official-run checks one by one.
+
+# Revision 3, phase A: pre-submission blockers (2026-10-05)
+
+## A1 Entry point (done)
+
+- The one command is `uv run signalpost --organisations <in> --output <out> [--bulk <snapshot>]`.
+  The `pyproject` script `signalpost` (hatchling build, `norway_company_agent.cli:main`) runs
+  `run_agent.py`. `scripts/run_competition_batch.py` (the kit's documented runner) is now a thin
+  wrapper. It takes the kit's arguments, forwards the ones the agent uses, and accepts and ignores
+  `--checkpoint-every/--resume/--modules`. The README and FINAL_REPORT show the same command.
+- Fixes found on the way: `run_agent.py` imported `scripts.build_prototype` only when run from its
+  own directory, so it now puts the repo root on `sys.path`. The bulk snapshot is opened as gzip or
+  plain CSV by its magic bytes. The kit README saves the gzip download as `brreg-enheter.csv`, and
+  Builderr may pass a plain CSV.
+- 20 proxy companies, run through `run_agent.py` and through the kit wrapper: 18/20 envelopes are
+  identical after dropping timestamps, run ids and counters. The other 2 differ only in content
+  hashes of `usbl.no` (shared by both companies), whose bytes change per request while the
+  extracted text is identical. No duplicate evidence ids, claims or changes. New tool:
+  `eval/determinism.py`.

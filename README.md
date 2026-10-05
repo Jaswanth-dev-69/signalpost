@@ -44,38 +44,29 @@ The manifest selector can create a local test batch of any size. Use 100 rows fo
 
 ```bash
 uv sync
-curl -L 'https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv' -o brreg-enheter.csv
 curl -L 'https://builderr.ai/signalpost-company-universe-2025.jsonl.gz' -o signalpost-universe.jsonl.gz
 
 uv run python select_entry_batch.py \
   --universe signalpost-universe.jsonl.gz \
   --count 100 \
-  --output entry-companies.jsonl
+  --output smoke-companies.jsonl
 
-# Use the 100-company batch as your smoke test.
-cp entry-companies.jsonl smoke-companies.jsonl
-
-uv run python scripts/run_competition_batch.py \
+# The one evaluator command. --bulk is the frozen BRREG snapshot (gzip or plain CSV); when the
+# file is absent the agent downloads it from data.brreg.no inside its time budget.
+uv run signalpost \
   --organisations smoke-companies.jsonl \
-  --bulk brreg-enheter.csv \
-  --profiles-output out/smoke-profiles.jsonl \
+  --bulk brreg-enheter.csv.gz \
   --output out/smoke-envelopes.jsonl \
-  --report out/smoke-report.json \
-  --run-id smoke-001 \
-  --expected-count 100
-
-# You may test at larger scale locally, but Builderr supplies the official batch for scoring.
-uv run python scripts/run_competition_batch.py \
-  --organisations entry-companies.jsonl \
-  --bulk brreg-enheter.csv \
-  --profiles-output out/profiles.jsonl \
-  --output out/envelopes.jsonl \
-  --report out/run-report.json \
-  --run-id local-001 \
-  --expected-count 1000
+  --run-id smoke-001
 
 uv run --with pytest pytest -q
 ```
+
+`uv run signalpost`, `uv run python run_agent.py` and the kit's documented
+`uv run python scripts/run_competition_batch.py` (same arguments as the starter kit:
+`--organisations --bulk --output --profiles-output --report --run-id --expected-count --workers`)
+all run the same agent and write the same envelopes. Outputs next to `--output`: `.profiles.jsonl`,
+`.report.json` (run report: runtime, requests, third-party cost 0) and `.viewer.html`.
 
 The published archive was clean-room verified on August 24, 2026: 104 tests and 5 subtests passed, followed by a one-company live BRREG smoke run with one terminal envelope, five requests and zero silent drops.
 

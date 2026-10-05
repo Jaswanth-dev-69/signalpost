@@ -29,6 +29,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(1, str(ROOT))  # scripts.build_prototype, whatever the entry point
 
 from norway_company_agent.batch import declared_domain_counts, profile_complete_for_modules, profiles_from_bulk, read_organisation_inputs, validate_envelopes  # noqa: E402
 from norway_company_agent.contract import profile_to_contract_envelope  # noqa: E402

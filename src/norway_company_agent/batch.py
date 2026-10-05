@@ -128,15 +128,14 @@ def profiles_from_bulk(path: str | Path, organisation_numbers: Iterable[str]) ->
 def declared_domain_counts(path: str | Path) -> dict[str, int]:
     """How many registry entities declare each registered domain as their homepage (hjemmeside)."""
     import csv
-    import gzip
     import re
     from collections import Counter
 
+    from .sampling import open_bulk
     from .webclaims import registered_domain
 
     counts: Counter[str] = Counter()
-    opener = gzip.open if str(path).endswith(".gz") else open
-    with opener(path, "rt", encoding="utf-8-sig", newline="") as handle:
+    with open_bulk(path) as handle:
         sample = handle.read(8192)
         handle.seek(0)
         reader = csv.reader(handle, csv.Sniffer().sniff(sample, delimiters=";,\t"))

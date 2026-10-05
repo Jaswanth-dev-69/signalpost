@@ -141,8 +141,16 @@ def deterministic_financial_filer_sample(
     return selected, metadata
 
 
+def open_bulk(path: str | Path):
+    """Open the registry snapshot as text, gzip-compressed (as BRREG serves it) or plain CSV."""
+    with open(path, "rb") as probe:
+        compressed = probe.read(2) == b"\x1f\x8b"
+    opener = gzip.open if compressed else open
+    return opener(path, "rt", encoding="utf-8-sig", newline="")
+
+
 def iter_bulk(path: str | Path) -> Iterable[dict[str, Any]]:
-    with gzip.open(path, "rt", encoding="utf-8-sig", newline="") as handle:
+    with open_bulk(path) as handle:
         sample = handle.read(8192)
         handle.seek(0)
         dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
