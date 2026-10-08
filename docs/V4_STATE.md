@@ -451,7 +451,7 @@ one discovered site per 100–200 companies per run); a cheap retry of fast fail
 | P4 refresh correctness | determinism pair 27 false changes (c1) → 0 (c3); coverage equal | −1 company (flaky discovery, flagged) | ±1 company per run | 0 | +3.8% / +21.0% | **kept** (c3); retry variant c2 dropped |
 | P5 discovery | — | — | — | — | — | nothing new to try |
 
-Gates on the final code (proxy-200): 159 unit tests, frozen guard clean (also vs `v3-submitted`),
+Gates on the final code (proxy-200): 157 unit tests, frozen guard clean (also vs `v3-submitted`),
 schema 0 errors, claim audit 0 issues, determinism pair 0 duplicates / 0 change events, refresh 0
 material, precision_audit 99/100 and 0 wrong-company, evidence_audit 100% verbatim, red team 0/35,
 synthesis text identical to main for 200/200, viewer DATA differs only in live page content. Cold-cache
