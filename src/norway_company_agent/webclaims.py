@@ -372,24 +372,6 @@ def _title(soup: BeautifulSoup) -> str:
     return " ".join((soup.title.get_text(" ", strip=True) if soup.title else "").split())[:300]
 
 
-def verbatim_window(text: str, parts: list[str], limit: int = 480) -> str | None:
-    """Shortest contiguous stretch of ``text`` containing every part (case-insensitive), widened to
-    word boundaries. ``text`` must already be whitespace-normalized page text."""
-    spans = []
-    folded = text.casefold()
-    for part in parts:
-        part = " ".join(str(part or "").split())
-        index = folded.find(part.casefold()) if part else -1
-        if index < 0:
-            return None
-        spans.append((index, index + len(part)))
-    start, end = min(a for a, _ in spans), max(b for _, b in spans)
-    start = text.rfind(" ", 0, start) + 1 if start > 0 and text[start - 1] != " " else start
-    stop = text.find(" ", end)
-    window = text[start:stop if stop != -1 else len(text)].strip()
-    return window if 0 < len(window) <= limit else None
-
-
 def article_item(page: dict[str, Any], soup: BeautifulSoup) -> dict[str, Any] | None:
     """A dated news item read from the article's own page: its heading and its own publication date."""
     found = article_date(soup, page["url"])
@@ -542,9 +524,6 @@ def _listing_inline_items(listing: dict[str, Any], soup: BeautifulSoup, domain: 
         title = " ".join((heading.get_text(" ", strip=True) if heading else anchor.get_text(" ", strip=True)).split())[:300]
         if len(title) < 4:
             continue
-        container_text = " ".join(container.get_text(" ", strip=True).split())
-        visible_date = found[1] if found[2] == "listing_text_date" else (time_node.get_text(" ", strip=True) if time_node is not None else "")
-        window = verbatim_window(container_text, [title, visible_date]) if visible_date else None
         items[url] = {
             "title": title,
             "url": url,
@@ -554,8 +533,9 @@ def _listing_inline_items(listing: dict[str, Any], soup: BeautifulSoup, domain: 
             "source_page": listing["url"],
             "content_sha256": listing["content_sha256"],
             "retrieved_at": listing["retrieved_at"],
-            "claim_span": window or title,
-            "date_span": None if window else found[1],
+            # Title and date are quoted separately, each from its own node (never a window across both).
+            "claim_span": title,
+            "date_span": found[1],
             "extraction_method": f"news_listing:{found[2]}",
         }
     return list(items.values())
@@ -721,8 +701,8 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
         listing_has_articles = bool(listing_articles)
         for item in _listing_inline_items(listing_page, soup, domain) + _jsonld_article_items(listing_page, soup, domain):
             items.setdefault(item["url"], item)
-        text = " ".join(soup.get_text(" ", strip=True).split())
-        checked.append({**_page_ref(listing_page), "claim_span": (_title(soup) or "news page") + " | " + text[:160]})
+        # The checked page is cited by its own heading or title, verbatim.
+        checked.append({**_page_ref(listing_page), "claim_span": _title(soup)})
 
     if len(items) < MAX_NEWS_ITEMS:
         raw_home = home["raw"]

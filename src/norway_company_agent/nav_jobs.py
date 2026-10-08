@@ -104,11 +104,14 @@ class NavJobIndex:
             status, sitemap_raw, sitemap_time = _get(SITEMAP_URL)
             uuids = list(dict.fromkeys(re.findall(rb"/stillinger/stilling/([0-9a-f-]{36})", sitemap_raw)))
             self.total = len(uuids)
+            first_loc = re.search(rb"<loc>\s*([^<\s]+)\s*</loc>", sitemap_raw)
             self.sitemap = {
                 "url": SITEMAP_URL,
                 "content_sha256": hashlib.sha256(sitemap_raw).hexdigest(),
                 "retrieved_at": sitemap_time,
                 "active_ads": len(uuids),
+                # A verbatim text node of the sitemap: the evidence span for "no ad names this employer".
+                "first_loc": first_loc.group(1).decode("utf-8", errors="replace") if first_loc else None,
             }
             deadline = started + self.time_budget_s
             with ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="nav-entry") as pool:

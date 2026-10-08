@@ -7,7 +7,6 @@ import urllib.parse
 from typing import Any
 
 from .batch import evidence_terminal_state
-from .nav_jobs import company_orgnrs
 from .webclaims import MAX_NEWS_ITEMS
 
 BULK_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv"
@@ -104,14 +103,14 @@ def _snippet(text: str, needle: str, width: int = 90) -> str | None:
     return _word_bounded(text, max(0, index - width), index + len(needle) + width)
 
 
-def _org_number_snippet(text: str, org: str) -> str | None:
+def _org_number_snippet(text: str, org: str, width: int = 90) -> str | None:
     if not text or len(org) != 9:
         return None
     pattern = r"\s?".join(org[:3]) + r"\s?" + r"\s?".join(org[3:6]) + r"\s?" + r"\s?".join(org[6:])
     match = re.search(r"(?<!\d)" + pattern + r"(?!\d)", text)
     if not match:
         return None
-    return _word_bounded(text, max(0, match.start() - 90), match.end() + 90)
+    return _word_bounded(text, max(0, match.start() - width), match.end() + width)
 
 
 def _live_registry_values(record: dict[str, Any]) -> dict[str, Any]:
@@ -260,6 +259,7 @@ def profile_to_contract_envelope(
         claim_span: str | None,
         key_hint: str,
         method: str | None = None,
+        effective_at: str | None = None,
     ) -> str | None:
         # Evidence is only emitted for content that was really fetched: a real
         # sha256 of the bytes, the true fetch time and a non-empty supporting span.
@@ -280,6 +280,8 @@ def profile_to_contract_envelope(
             "claim_span": span,
             "extraction_method": method or _extraction_method(key_hint),
         }
+        if effective_at:
+            evidence_map[ev_id]["effective_at"] = effective_at
         return ev_id
 
     def evidence_from(record: dict[str, Any], span: str, key_hint: str, default_class: str) -> str | None:
@@ -562,11 +564,11 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
     for item in nav.get("postings") or []:
         page = item.get("page_evidence") or {}
         if page:
-            ev = add_evidence(page.get("url"), "official_job_register", page.get("retrieved_at"), page.get("content_sha256"), page.get("claim_span"), f"nav_{item['uuid']}", "nav_ad_page_title")
-            org_ev = add_evidence(page.get("url"), "official_job_register", page.get("retrieved_at"), page.get("content_sha256"), page.get("orgnr_span"), f"nav_org_{item['uuid']}", "nav_ad_page_employer_orgnr")
+            ev = add_evidence(page.get("url"), "official_job_register", page.get("retrieved_at"), page.get("content_sha256"), page.get("claim_span"), f"nav_{item['uuid']}", "nav_ad_page_title", item.get("published"))
+            org_ev = add_evidence(page.get("url"), "official_job_register", page.get("retrieved_at"), page.get("content_sha256"), page.get("orgnr_span"), f"nav_org_{item['uuid']}", "nav_ad_page_employer_orgnr", item.get("published"))
         else:
-            ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_title_span"), f"nav_{item['uuid']}", "nav_ad_json_title")
-            org_ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_span"), f"nav_org_{item['uuid']}", "nav_ad_json_employer_orgnr")
+            ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_title_span"), f"nav_{item['uuid']}", "nav_ad_json_title", item.get("published"))
+            org_ev = add_evidence(item.get("entry_url"), "official_job_register", item.get("entry_retrieved_at"), item.get("entry_sha256"), item.get("entry_span"), f"nav_org_{item['uuid']}", "nav_ad_json_employer_orgnr", item.get("published"))
         if ev:
             nav_postings.append((item["url"], [ev, org_ev], {
                 "kind": "job_posting",
@@ -581,10 +583,11 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
     sitemap = nav.get("sitemap") or {}
     nav_checked_ev = None
     if nav.get("index_complete") and sitemap:
+        # The span is a verbatim node of the fetched sitemap, never a sentence of ours. The numbers looked
+        # up are the company's own and its registered sub-units' (nav_jobs.company_orgnrs).
         nav_checked_ev = add_evidence(
             sitemap.get("url"), "official_job_register", sitemap.get("retrieved_at"), sitemap.get("content_sha256"),
-            f"{sitemap.get('active_ads')} active ads listed; employer organisation numbers checked: {', '.join(sorted(company_orgnrs(profile))[:5])}",
-            "nav_sitemap",
+            sitemap.get("first_loc"), "nav_sitemap",
         )
 
     base_add_claim = add_claim
@@ -630,12 +633,14 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         pages = {p.get("url"): p for p in web_val.get("pages") or [] if p.get("url")}
         home_hash = web_val.get("content_sha256") or web_rec.get("content_sha256")
         home_time = web_rec.get("retrieved_at")
-        # Quote one contiguous field (never text joined across title/description/body).
-        fields = [str(web_val.get(k) or "") for k in ("title", "description", "main_text_excerpt")]
+        # Quote one contiguous field (never text joined across title/description/body). The title and
+        # meta description are single nodes; extracted body text joins several, so it is quoted tightly:
+        # the number or the name alone, which sits inside one text node.
+        fields = [(str(web_val.get(k) or ""), 0 if k == "main_text_excerpt" else None) for k in ("title", "description", "main_text_excerpt")]
         name_core = re.sub(r"\s+(AS|ASA|ANS|DA|ENK|SA|NUF)$", "", str(profile.get("name") or "").strip(), flags=re.I)
         span = (
-            next((snip for snip in (_org_number_snippet(f, org) for f in fields) if snip), None)
-            or next((snip for snip in (_snippet(f, name_core, 60) for f in fields) if snip), None)
+            next((snip for snip in (_org_number_snippet(f, org, 90 if w is None else w) for f, w in fields) if snip), None)
+            or next((snip for snip in (_snippet(f, name_core, 60 if w is None else w) for f, w in fields) if snip), None)
             or web_val.get("title")
             or web_url
         )
@@ -684,8 +689,9 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
                 # Two pages with the same title and timestamp give one fact, not duplicate records.
                 continue
             source, method = item.get("source_page"), item.get("extraction_method") or "news_page_text"
-            ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"news_{item.get('url')}", method)
-            date_ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("date_span"), f"news_date_{item.get('url')}", method) if item.get("date_span") else None
+            # A news item's effective date is its own publication timestamp.
+            ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"news_{item.get('url')}", method, stamp)
+            date_ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("date_span"), f"news_date_{item.get('url')}", method, stamp) if item.get("date_span") else None
             if ev:
                 news_seen.add(value)
                 claim = add_claim("dated_news", value, "available", 0.9, [ev, date_ev])
@@ -699,7 +705,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         jobs = web_claims.get("jobs") or {}
         site_postings = []
         for item in (jobs.get("postings") or [])[:25]:
-            ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"job_{item.get('url')}", item.get("extraction_method") or "job_posting_text")
+            ev = add_evidence(item.get("source_page"), "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"job_{item.get('url')}", item.get("extraction_method") or "job_posting_text", item.get("posted_date"))
             if ev:
                 attrs = {k: item.get(k) for k in ("title", "posted_date", "valid_through", "platform") if item.get(k)}
                 site_postings.append((item["url"], [ev], {"kind": "job_posting", **attrs, "source_url": item.get("source_page")}))
@@ -713,7 +719,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         # Website fetched but the strict entity gate did not pass: publish nothing from it.
         web_url = web_val.get("final_url") or web_rec.get("source_url")
         span = web_val.get("title") or web_url
-        ev = add_evidence(web_url, "company_owned", web_rec.get("retrieved_at"), web_val.get("content_sha256") or web_rec.get("content_sha256"), f"{span} (exact legal entity not established)", "website_quarantined")
+        ev = add_evidence(web_url, "company_owned", web_rec.get("retrieved_at"), web_val.get("content_sha256") or web_rec.get("content_sha256"), web_val.get("title"), "website_quarantined")
         state, evs = "ambiguous", [ev, hjemmeside_ev]
     elif deadline_hit and not web_status:
         state, evs = "failed", [hjemmeside_ev or entity_ev]

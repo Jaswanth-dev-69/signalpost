@@ -5,7 +5,7 @@ import time
 import unicodedata
 from typing import Any
 
-from .identity import DECLARED_DOMAIN_REJECT, _structured_names, _tokens, apply_website_identity_gate, publishable_social_links
+from .identity import DECLARED_DOMAIN_REJECT, _structured_names, _tokens, apply_website_identity_gate, own_org_number_printed, publishable_social_links
 from .website import fetch_website
 
 FREEMAIL_DOMAINS = {
@@ -127,6 +127,8 @@ def strict_discovered_proof(profile: dict[str, Any], value: dict[str, Any]) -> t
     exact = re.compile(r"(?<!\d)" + r"\s?".join([org[:3], org[3:6], org[6:]]) + r"(?!\d)") if len(org) == 9 else None
     if org in site_orgs or (exact and exact.search(all_text)):
         return True, "exact organisation number on homepage or contact/about/privacy page"
+    if own_org_number_printed(profile, value):
+        return True, "exact organisation number printed on the site (footer, structured data or identity page), no other organisation number"
     core = _tokens(profile.get("name"))
     muni = set(_tokens(profile.get("municipality") or ""))
     page_tokens = set(_tokens(identity_text))

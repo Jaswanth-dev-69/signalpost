@@ -167,6 +167,7 @@ def strip_private_fields(record: dict[str, Any] | None) -> None:
     if isinstance(value, dict):
         value.pop("_homepage", None)
         value.pop("_subpages", None)
+        value.pop("_org_numbers_anywhere", None)
 
 
 def normalize_social_url(url: str) -> dict[str, str] | None:
@@ -453,13 +454,18 @@ def _fetch_website_once(url: str | None, *, timeout: float = 15.0, max_bytes: in
             social.extend({**item, "found_on_page": page["url"]} for item in _social_links_raw(page["url"], page_soup))
             subpages.append(page)
         # Organisation numbers printed on the site (footer, contact, privacy pages).
-        from .identity import org_numbers_in_text
+        from .identity import org_numbers_anywhere, org_numbers_in_text
 
-        site_orgs = org_numbers_in_text(" ".join(soup.get_text(" ", strip=True).split()))
+        home_text = " ".join(soup.get_text(" ", strip=True).split())
+        site_orgs = org_numbers_in_text(home_text)
+        printed = org_numbers_anywhere(home_text)
         for page in subpages:
             page_text = " ".join(BeautifulSoup(page["raw"].decode("utf-8", errors="replace"), "lxml").get_text(" ", strip=True).split())
             site_orgs.extend(o for o in org_numbers_in_text(page_text) if o not in site_orgs)
+            printed.extend(o for o in org_numbers_anywhere(page_text) if o not in printed)
         value["org_numbers_on_site"] = site_orgs
+        # In memory only (stripped before serialization): every valid number printed, labelled or not.
+        value["_org_numbers_anywhere"] = printed
         metrics = fetcher.metrics()
         requests += metrics["requests"]
         bytes_received += metrics["bytes"]
