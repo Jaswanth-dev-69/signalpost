@@ -235,9 +235,50 @@ itself is re-timed today under the same NAV conditions.
 | Synthesis / viewer diff vs v4-dev | synthesis text differs for 1/200 (Flav: social links loaded in this run); viewer DATA differs only in live page content and news items of 3–4 companies. No synthesis or viewer code edited |
 | Runtime | proxy-200 wall is NAV-bound: v3 re-timed today **288 s** (NAV done 286.8 s); fin2 327 s (overlapping the red team) and 306 s → +6% to +13.5% vs v3 today. Web pass (code-dependent): v3 84 s, v4-dev 87 s, fin2 101–102 s (tail: slow sites now use their full 60 s budget). Throughput (summed request latency, what a 1,500 run scales with): v3 1,227 s, v4-dev 1,342 s, fin2 1,364 s = **+11% vs v3, +1.6% vs v4-dev**. 1,500-company estimate ≈ 15 + 150 + 916 ≈ 1,080 s (v3 ≈ 990 s), under the 1,500 s hard deadline |
 | Clean clone (850993e, from GitHub) | fresh clone, no venv before install, `uv sync` exit 0 (warm uv cache; rev3 covered a cold install), `uv run signalpost --organisations docs/smoke-test/smoke-companies.jsonl --output … --bulk …`: exit 0 in 268 s, **100/100 envelopes, schema 0 errors** |
+| Parity of the final commit 850993e vs 07d1a92 | same companies in every family on both sets; news facts 295 → 293 (proxy-200, live noise), 412 = 412 (sample-100); schema 0 errors; wall 275 s on both sets (NAV faster) |
+| Span census, final output (proxy-200, every evidence item, `Accept: */*`) | 11,579 items on 1,134 URLs. Live-checkable 11,171 loaded: **4 fail the one-node check (99.96%)**, 2 fail the visible-text check (p22.no `<strong>` paragraph and a serit.no live change, each counted twice via the summary claim). 400 bulk-CSV items cannot be re-fetched (150 MB file): 200/200 verbatim in their snapshot records offline. 8 items not loaded (one site down at census time). v4-dev: about 546 failing items (4.9%) |
 | Budget-cut crawls (per-company 60 s web budget) | 1–2 → 4 (proxy-200), 2 → 5 (sample-100); each cut company gained 10 news items and lost nothing; cuts only set `web_claims.crawl_complete=false` (used by refresh to avoid false removals), never an envelope state |
+
+## Summary (stopped here; nothing packaged)
+
+Candidate: **850993e** on `v4-dev` (pushed; `main` = v3 = 6074351 untouched). Code changes vs v3:
+rev4's kept E5/E5b/E6/E7, plus W2 (verbatim single-node spans, effective dates) and W3 (news
+pagination with its two fixes). W1c is reverted; W1 generator not implemented; W4 not triggered.
+
+| Workstream | proxy-200 before → after (companies; facts) | sample-100 | Noise floor | Wrong-company | Wall / cost | Verdict |
+|---|---|---|---|---|---|---|
+| W0 scorer mirror | analysis | analysis | — | — | — | Fits kit/v2 within ±0.5 after one scale (λ ≈ 1.18); description and registry families rejected; any `available` kit-profile website counts; v1 anchor not comparable |
+| W1a/b generator challenger | labelled gate recall 22.3% → 22.9% (weighted) | — | — | **2 unsafe name-rule passes** | discovery +32% | Not implemented |
+| W1c proof detection | website 44 → 44 | 72 → 72 | ±1 | 0 | 0 | Reverted (labelled +1/400 only) |
+| W2 evidence | coverage unchanged; failing spans ~546 → 4 of ~11.2k; effective dates on news and dated postings | evidence_audit 100% verbatim | — | 0 | 0 | Kept |
+| W3 news pagination (+ fixes) | news 23 → 23; 196 → 293–295 facts | news 34 → 35; 312 → 412 | ±1–2 facts, ±1 company | 0 | requests +3%, summed latency +1.6% vs v4-dev (+11% vs v3); wall NAV-bound 275–327 s vs v3 today 288 s | Kept |
+| W3 social / hiring | unchanged | unchanged | — | — | — | At ceiling (site-level misses; ATS/JS postings) |
+| W4 shape hedges | — | — | — | — | — | Not triggered; ranked and prepared |
+
+Recall and Evidence estimate (v4 = 850993e; mirror on sample-100 scaled by λ):
+- Recall, case A (scorer reads website and social from the kit profile, as for the kit, and does not
+  read our per-fact news/hiring claims): **15–19** (point 17.4), v4 = v3.
+- Recall, case B (per-fact `dated_news` / `hiring_signal` claims are read): **26–34** (upper bound
+  35.7 when the pool is mostly our own facts), v4 = v3 + 0.5 to 1.0 (news facts +32–51%).
+- Evidence: **26–29**. v4 removes the last ~5% non-verbatim spans and adds effective dates; how
+  deductions are computed is unknown (Q7).
+- Total with Synthesis 12 and UX 8: case A **61–68** (qualifying needs Recall + Evidence ≥ 45),
+  case B **72–83**.
+
+Recommendation: 850993e is ready to be v4 (strictly better evidence, +32–51% news facts, no coverage
+loss, 0 wrong-company). Not packaged (needs the user's go-ahead). Because the v3 feedback should land
+around 9–10 October and decides between case A and B, the safer path is to read it first and add a
+W4 hedge to v4 if news/hiring are still 0%, keeping v5 as the correction slot; if no feedback by
+10 October, submit 850993e as is.
+
+Questions still waiting on Builderr (`docs/QUESTIONS_FOR_BUILDERR.md`): Q1 which command scored us;
+Q2/Q3/Q17 which shapes are read for news, hiring and social; Q4 value normalisation; Q5 scored
+families; Q7 which evidence checks cost points; Q10/Q11 time budget and snapshot hand-off; Q13
+`external.handles`; Q14 group sites (Elopak); Q15 span format for the accounts API (JSON vs XML);
+Q16 whether `publishable:false` website records count.
 
 ## Next step
 
-Pending: parity runs of 850993e on proxy-200 and sample-100, full span census on the final output.
-Then the final summary.
+When the v3 feedback arrives: map its per-family percentages to case A/B above. If news or hiring is
+still 0.0%, implement W4 hedge 1 (kit observation records) on `v4-dev` with the same gates. Otherwise,
+with the user's go-ahead, package 850993e (smoke test, gist, submission text).
