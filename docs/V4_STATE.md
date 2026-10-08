@@ -373,6 +373,42 @@ calibration, whose runs were lost with /tmp): case A (kit profile read) v3 = mai
 | H6 / P4 TLS hostname mismatch → bare domain | registry homepages not loaded: proxy-200 dns 4, robots 2, HTTP 500 2, empty document 1, TLS mismatch 1; sample-100 timeout 1, HTTP 403 1. The TLS case fails on both `www.` and bare host (certificate for another host); the empty one is a 239-byte stub; registry homepages already retry www/bare and http | Rejected (0 recoverable) |
 | P5 discovery | no new idea; no search API offered | Not started |
 
+## P1 read-path hedge + P2 evidence (030cce2, kept)
+
+Discovery while sizing P1: the kit's `scripts/build_prototype.py:compact()` builds Builderr's sample
+DATA `external` block from kit observation records (`profile_handle` → `handles`; `public_post` /
+`job_posting` → `linkedin.posts` / `jobs`). Builderr's own pipeline therefore carries news and hiring
+as observations, which is what the hedge emits.
+
+- **P1** (`contract._external_hedges`, additive): every available `dated_news` and `hiring_signal`
+  claim also appears as a kit observation record in `external.observations` (`public_post` /
+  `job_posting`; `company_site`, or `job_board` for NAV; `source_url`, `retrieved_at`,
+  `content_sha256`, `exact_entity`, `identity_proof`, `acquisition_mode`, `rights_status`,
+  `evidence_span` = the claim's first evidence item) and, for company-site facts, in
+  `external.company_site.{posts,jobs}` in the sample's `external.linkedin` layout. Never under
+  `linkedin`. Social is not duplicated: the mirror shows the kit profile's social links are read.
+- **P2a**: the accounting-obligation filing year cites the live `/enheter/{org}` record already
+  fetched (`"sisteInnsendteAarsregnskap":"2025"`), not the 150 MB bulk CSV.
+- **P2b**: no Accept-independent URL exists (`?format=json`, `?mediaType=json` still XML; `.json`
+  404). Accounts spans are now value literals (`288000.00`, `2024-12-31`), checked verbatim in both
+  representations (820/820 scalar literals appear as `<key>value</key>` in the XML); the period claim
+  also cites its start date.
+- **P2c** (`eval/claim_audit.py`, offline): v3 had only missing effective dates (164 news, 3
+  postings); main and c1 have **0 issues** (no duplicate claims or evidence ids, no stray values on
+  non-available claims, no evidence without hash/span/method/source, no orphan evidence).
+
+| Measure | main | c1 = 030cce2 |
+|---|---|---|
+| Claims rebuilt from the same saved profiles (300 envelopes) | — | **identical** in 300/300; kit profile identical |
+| Hedge records (proxy-200 / sample-100) | 0 | 293 / 434 observations, **0 invalid** by the kit's `validate_observation`; posts 275 / 410, jobs 15 / 21 |
+| Registry + accounts evidence verbatim, browser-style Accept | **61.0%** (accounts spans fail on XML) | **100.0%** (9,903 items) |
+| … with `Accept: */*` | 100% | 100.0% |
+| Evidence citing the bulk CSV | 200 / 101 | **0 / 1** |
+| Live coverage (proxy-200 / sample-100) | — | equal except one company on each set (926768735 discovered site not re-found; 931932217 news), crawl noise: the rebuild above shows the code changes no claim |
+| Requests / summed latency vs main | — | 2,355 vs 2,382; +0.8% / +2.4% (noise) → 1,500 projection ≈ 1,040 s |
+| Envelope size | 7.6 / 5.2 MB | 7.8 / 5.9 MB |
+| Mirror (sample-100) | A 20.52, B 42.18 | A **20.52**, B **41.96**, hedge-only reader **41.96** (was 20.52) |
+
 ## Next step
 
 1. When the v3 feedback arrives: map its per-family percentages to case A/B in the Summary. If news
