@@ -182,6 +182,28 @@ run: data, not code); viewer DATA differs only in live page content (logos, exce
 identity-assessment detail) and in news items for 2 companies (the viewer shows the top items only).
 No synthesis or viewer code was edited.
 
+## W4: shape hedges (not triggered; prepared only)
+
+W4 applies only if Builderr's v3 feedback shows news, hiring or social still read as 0.0%. The
+feedback has not arrived, so nothing is implemented. Ranked candidates if it does (W0 says each of
+news and hiring is worth up to 12.5 recall points if read, realistically 5–8):
+
+1. **Kit observation records** (`src/norway_company_agent/external_footprint.py` schema, which the
+   kit's own `extract_company_site_news.py` emits): one record per news item (`platform:
+   company_site`, `signal_type: public_post`) and per careers page or posting (`signal_type:
+   job_posting`), with `source_url`, `retrieved_at`, `content_sha256`, `exact_entity: true`,
+   `identity_proof`, `acquisition_mode: permitted_public_page`, `rights_status: approved`,
+   `evidence_span`. Built from the same identity-gated facts as the claims. Risks: a second copy of
+   each fact (the contract says the union removes duplicate facts; within one envelope it is a second
+   representation, not a duplicate record across reruns); `public_post` might be read as buzz rather
+   than dated news (no precision harm). Cannot create a wrong-company publication (same gate).
+2. **Sample object style**: a `external.company_site` block with `posts` / `jobs` arrays using the
+   sample's keys (`date_published`, `text`, `source`, `retrievedAt`, `hash`, `rightsStatus`,
+   `sourceClass`). Never under `external.linkedin` (that would misstate the platform). Risk: read only
+   if the scorer generalises beyond `linkedin`.
+3. `profile.evidence.website.value.news` / `.jobs` lists: changes the kit-shaped profile (frozen);
+   lowest priority.
+
 ## Next step
 
 Final candidate = 59a4178 (W2 + W3; W1c reverted). W5 gates are running: proxy-200 twice into one
