@@ -15,6 +15,7 @@ Read modes (how the scorer is assumed to read an envelope):
            hiring_signal / job_postings), list values unpacked.
   scalar   claims, but only scalar values (a list-valued claim is not read).
   auto     kit if the envelope has a profile, else scalar (what v2's 0.0% social suggests).
+  hedge    kit, plus news and hiring from external.observations (the kit's observation records).
 
 Usage:
   python eval/scorer_mirror.py --orgs ORGS.txt --run kit=KIT.jsonl:kit --run v2=V2.jsonl:auto \
@@ -86,6 +87,15 @@ def facts_claims(envelope: dict, scalar_only: bool = False) -> dict[str, set]:
     return out
 
 
+def facts_hedge(envelope: dict) -> dict[str, set]:
+    out = facts_kit(envelope)
+    for obs in (envelope.get("external") or {}).get("observations") or []:
+        key = "dated_news" if obs.get("signal_type") == "public_post" else "hiring_signal" if obs.get("signal_type") == "job_posting" else None
+        if key and obs.get("url"):
+            out[key].add(str(obs["url"]).rstrip("/").casefold())
+    return out
+
+
 def read_facts(envelope: dict, mode: str) -> dict[str, set]:
     if mode == "kit":
         return facts_kit(envelope)
@@ -97,6 +107,8 @@ def read_facts(envelope: dict, mode: str) -> dict[str, set]:
         return facts_claims(envelope, scalar_only=True)
     if mode == "auto":
         return facts_kit(envelope) if envelope.get("profile") else facts_claims(envelope, scalar_only=True)
+    if mode == "hedge":
+        return facts_hedge(envelope)
     if mode == "both":
         merged = facts_kit(envelope)
         for key, values in facts_claims(envelope).items():

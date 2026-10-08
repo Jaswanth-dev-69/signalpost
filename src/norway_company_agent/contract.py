@@ -385,8 +385,13 @@ def profile_to_contract_envelope(
     if registry_ok and acc_ob:
         form_ev = registry_evidence("legal_form", profile_values.get("legal_form"))
         filing_ev = None
-        if bulk_ok and acc_value.get("latest_submitted_accounts"):
-            filing_span = _bulk_span(bulk.get("value"), "sisteInnsendteAarsregnskap") or f"{org} sisteInnsendteAarsregnskap: {acc_value.get('latest_submitted_accounts')}"
+        latest_accounts = acc_value.get("latest_submitted_accounts")
+        if latest_accounts and live_ok and str((live.get("value") or {}).get("latest_submitted_accounts") or "") == str(latest_accounts):
+            # The live record already fetched states the same year: quote it there, a small page a
+            # verifier can re-fetch, rather than a row of the 150 MB bulk file.
+            filing_ev = evidence_from(live, f'"sisteInnsendteAarsregnskap":{json.dumps(str(latest_accounts))}', "registry_latest_accounts", "official_registry_live")
+        elif bulk_ok and latest_accounts:
+            filing_span = _bulk_span(bulk.get("value"), "sisteInnsendteAarsregnskap") or f"{org} sisteInnsendteAarsregnskap: {latest_accounts}"
             filing_ev = evidence_from(bulk, filing_span, "registry_latest_accounts", "official_registry_bulk")
         add_claim("accounting_obligation", acc_value, acc_ob.get("status", "available") if acc_ob.get("status") != "not_found" else "not_available", 1.0, [filing_ev, form_ev])
     else:
@@ -399,20 +404,28 @@ def profile_to_contract_envelope(
     if fin_status == "available" and fin_records:
         latest = fin_records[0]
         period = latest.get("period")
-        # Each span is one verbatim fragment of the API's compact JSON: the period object, and
-        # for every figure its own key and value; a claim cites both.
-        period_span = f'"regnskapsperiode":{json.dumps(period, ensure_ascii=False, separators=(",", ":"))}' if isinstance(period, dict) else _period_literal(period)
-        period_ev = evidence_from(fin_rec, period_span, "financials_period", "official_annual_accounts")
-        if period_ev and isinstance(period, dict):
-            evidence_map[period_ev]["effective_at"] = period.get("tilDato")
-        for field, key, label in FINANCIAL_FIELDS:
+        # The API answers JSON to "Accept: */*" and XML to a browser-style Accept, so each span is a
+        # value literal that both representations print verbatim ("288000.00", "2023-12-31"); the
+        # claim's field and reporting period say what it is. A claim cites its figure and the
+        # period's end date; the period claim also cites its start date.
+        period_ev = period_start_ev = None
+        if isinstance(period, dict) and period.get("tilDato"):
+            period_ev = evidence_from(fin_rec, str(period["tilDato"]), "financials_period", "official_annual_accounts")
+            if period.get("fraDato"):
+                period_start_ev = evidence_from(fin_rec, str(period["fraDato"]), "financials_period_start", "official_annual_accounts")
+        else:
+            period_ev = evidence_from(fin_rec, _period_literal(period), "financials_period", "official_annual_accounts")
+        for period_item in (period_ev, period_start_ev):
+            if period_item and isinstance(period, dict):
+                evidence_map[period_item]["effective_at"] = period.get("tilDato")
+        for field, key, _label in FINANCIAL_FIELDS:
             value = latest.get(key)
-            ev = evidence_from(fin_rec, f'"{label}":{value:.2f}', f"financials_{field}", "official_annual_accounts") if isinstance(value, (int, float)) else None
+            ev = evidence_from(fin_rec, f"{value:.2f}", f"financials_{field}", "official_annual_accounts") if isinstance(value, (int, float)) else None
             if ev and isinstance(period, dict):
                 evidence_map[ev]["effective_at"] = period.get("tilDato")
             claim = add_claim(field, value, "available" if value is not None else "not_available", 1.0, [ev, period_ev])
             claim["reporting_period"] = period
-        add_claim("reporting_period", period, "available" if period is not None else "not_available", 1.0, [period_ev])
+        add_claim("reporting_period", period, "available" if period is not None else "not_available", 1.0, [period_ev, period_start_ev])
     else:
         if fin_status == "available":
             state, ev = "not_available", evidence_from(fin_rec, "[]", "financials_empty", "official_annual_accounts")
@@ -506,9 +519,66 @@ def profile_to_contract_envelope(
             "runtime_ms": runtime_ms,
             "third_party_cost_usd": third_party_cost_usd,
         },
-        "external": {"handles": handles},
+        "external": {"handles": handles, **_external_hedges(org, claims, evidence_map, web_value)},
         "profile": profile,
     }
+
+
+def _external_hedges(org: str, claims: list[dict[str, Any]], evidence: dict[str, dict[str, Any]], web_value: dict[str, Any]) -> dict[str, Any]:
+    """The same published news and hiring facts in two further shapes, for a reader that does not read
+    the claims list: kit observation records (external_footprint.py schema; the kit's own site-news
+    extractor emits these) and a `company_site` block in the sample site's `external.linkedin` layout.
+    Built only from available claims and their first evidence item, so nothing here exists without
+    the claim, its gate and its verbatim span."""
+    identity = web_value.get("identity_assessment") or {}
+    site_proof = {"type": "website_identity_gate", "status": identity.get("status"), "score": identity.get("score"),
+                  "method": identity.get("method")}
+    observations: list[dict[str, Any]] = []
+    posts: list[dict[str, Any]] = []
+    jobs: list[dict[str, Any]] = []
+    for claim in claims:
+        field = claim.get("field")
+        if claim.get("availability") != "available" or field not in ("dated_news", "hiring_signal"):
+            continue
+        ev = next((evidence[i] for i in claim.get("evidence_ids") or [] if i in evidence), None)
+        if not ev:
+            continue
+        news = field == "dated_news"
+        nav = claim.get("platform") == "arbeidsplassen.nav.no"
+        url = claim.get("url") if news else claim.get("value")
+        published = claim.get("published_at") if news else claim.get("posted_date")
+        feed = "pam-stilling-feed" in str(ev.get("source_url"))
+        observation = {
+            "id": ("news-" if news else "job-") + hashlib.sha256(f"{org}|{field}|{claim.get('value')}".encode()).hexdigest()[:24],
+            "organisation_number": org,
+            "platform": "job_board" if nav else "company_site",
+            "signal_type": "public_post" if news else "job_posting",
+            "url": url,
+            "title": claim.get("title"),
+            "published_at": published,
+            "source_url": ev["source_url"],
+            "retrieved_at": ev["retrieved_at"],
+            "content_sha256": ev["content_sha256"],
+            "exact_entity": True,
+            "identity_proof": [{"type": "employer_organisation_number", "employer_orgnr": claim.get("employer_orgnr")}] if nav else [site_proof],
+            "acquisition_mode": "official_api" if feed else "permitted_public_page",
+            "rights_status": "approved",
+            "source_class": "official_job_register" if nav else "company_site",
+            "evidence_span": ev["claim_span"],
+            "claim_field": field,
+            "claim_value": claim.get("value"),
+            "evidence_ids": claim.get("evidence_ids"),
+        }
+        observations.append(observation)
+        if nav:
+            continue
+        meta = {"text": ev["claim_span"], "source": ev["source_url"], "retrievedAt": ev["retrieved_at"], "hash": ev["content_sha256"],
+                "rightsStatus": "approved", "sourceClass": "company_site"}
+        if news:
+            posts.append({"title": claim.get("title"), "url": url, "date_published": published, **meta})
+        else:
+            jobs.append({"title": claim.get("title"), "job_url": url, "kind": claim.get("kind"), "date_posted": published, **meta})
+    return {"observations": observations, "company_site": {"posts": posts, "jobs": jobs}}
 
 BOILERPLATE = re.compile(r"cookie|informasjonskapsl|javascript|personvern|privacy|logg inn|log in|handlekurv|nettleser|browser", re.I)
 ABOUT_PATH = re.compile(r"om-oss|om_oss|omoss|about|selskapet|firma", re.I)

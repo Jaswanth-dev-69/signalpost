@@ -155,12 +155,12 @@ class KitEnvelopeLayer(unittest.TestCase):
     def test_external_handles_are_the_verified_site_links_only(self):
         social = [{"platform": "facebook", "url": "https://facebook.com/MtmSkogservice", "found_on_page": "https://mtmskogservice.no/"}]
         env = envelope(verified_profile("811730912", "MTM SKOGSERVICE AS", "https://mtmskogservice.no/", social=social))
-        self.assertEqual(env["external"], {"handles": [{"platform": "facebook", "url": "https://facebook.com/MtmSkogservice",
-                                                        "rightsStatus": "approved", "source_url": "https://mtmskogservice.no/"}]})
+        self.assertEqual(env["external"]["handles"], [{"platform": "facebook", "url": "https://facebook.com/MtmSkogservice",
+                                                       "rightsStatus": "approved", "source_url": "https://mtmskogservice.no/"}])
         self.assertNotIn("linkedin", env["external"])
         unverified = verified_profile("811730912", "MTM SKOGSERVICE AS", "https://mtmskogservice.no/", social=social)
         unverified["evidence"]["website"]["value"]["identity_assessment"]["publishable"] = False
-        self.assertEqual(envelope(unverified)["external"], {"handles": []})
+        self.assertEqual(envelope(unverified)["external"]["handles"], [])
 
     def test_missing_module_after_deadline_is_budget_exhausted(self):
         profile = verified_profile("811730912", "MTM SKOGSERVICE AS", "https://mtmskogservice.no/")

@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from norway_company_agent.external_footprint import validate_observation  # noqa: E402
 from norway_company_agent.webclaims import _listing_inline_items, _next_listing_page  # noqa: E402
 from test_contract_rev3 import HASH_PAGE, T, available, envelope, verified_profile  # noqa: E402
 from bs4 import BeautifulSoup  # noqa: E402
@@ -98,6 +99,93 @@ class NewsPagination(unittest.TestCase):
         self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="/produkter/page/2/">x</a>'))
         self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="/nyheter-arkiv/page/2/">x</a>'))
         self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="https://other.no/nyheter/page/2">x</a>'))
+
+
+
+class ReadPathHedge(unittest.TestCase):
+    """P1: the published news and hiring facts also appear as kit observation records and as a
+    company_site block; built from the claims only, never without evidence."""
+
+    def build(self) -> dict:
+        url = "https://www.example.no/nyheter/ny-avtale"
+        news = {"title": "Ny avtale", "url": url, "published_date": "2025-09-22", "published_at": "2025-09-22T20:00:00+02:00",
+                "source_page": url, "content_sha256": HASH_PAGE, "retrieved_at": T, "claim_span": "Ny avtale",
+                "date_span": "2025-09-22T20:00:00+02:00"}
+        careers = {"url": "https://www.example.no/karriere", "content_sha256": HASH_PAGE, "retrieved_at": T, "claim_span": "Jobb hos oss"}
+        posting = {"title": "Lagerarbeider", "url": "https://www.example.no/jobb/1", "posted_date": "2026-09-01", "platform": "company_site",
+                   "source_page": "https://www.example.no/karriere", "content_sha256": HASH_PAGE, "retrieved_at": T, "claim_span": "Lagerarbeider"}
+        return envelope(verified_profile(ORG, "TESTSELSKAP NORD AS", "https://www.example.no/", news=[news], careers=careers, postings=[posting]))
+
+    def test_one_valid_kit_observation_per_published_fact(self):
+        env = self.build()
+        observations = env["external"]["observations"]
+        published = [c for c in env["claims"] if c["field"] in ("dated_news", "hiring_signal") and c["availability"] == "available"]
+        self.assertEqual(len(observations), len(published))
+        self.assertEqual(len({o["id"] for o in observations}), len(observations))
+        for observation in observations:
+            self.assertEqual(validate_observation(observation), [], observation)
+        self.assertEqual(sorted(o["signal_type"] for o in observations), ["job_posting", "job_posting", "public_post"])
+
+    def test_spans_hashes_and_urls_are_the_claims_own(self):
+        env = self.build()
+        evidence = {e["id"]: e for e in env["evidence"]}
+        for observation in env["external"]["observations"]:
+            first = evidence[observation["evidence_ids"][0]]
+            self.assertEqual((observation["evidence_span"], observation["content_sha256"], observation["source_url"]),
+                             (first["claim_span"], first["content_sha256"], first["source_url"]))
+
+    def test_company_site_block_in_the_sample_layout(self):
+        block = self.build()["external"]["company_site"]
+        self.assertEqual([p["date_published"] for p in block["posts"]], ["2025-09-22T20:00:00+02:00"])
+        self.assertEqual(sorted(j["job_url"] for j in block["jobs"]), ["https://www.example.no/jobb/1", "https://www.example.no/karriere"])
+
+    def test_nothing_without_a_verified_site(self):
+        profile = verified_profile(ORG, "TESTSELSKAP NORD AS", "https://www.example.no/")
+        profile["evidence"]["website"]["value"]["identity_assessment"] = {"publishable": False}
+        external = envelope(profile)["external"]
+        self.assertEqual((external["observations"], external["company_site"]), ([], {"posts": [], "jobs": []}))
+
+
+
+class RegistryAndAccountsSpans(unittest.TestCase):
+    """P2: accounts spans hold under both representations the API negotiates; the filing year cites
+    the live record already fetched, not the 150 MB bulk file."""
+
+    JSON = ('[{"regnskapsperiode":{"fraDato":"2024-01-01","tilDato":"2024-12-31"},"resultatregnskapResultat":'
+            '{"driftsresultat":{"driftsinntekter":{"sumDriftsinntekter":288000.00},"driftsresultat":-1250.50},"aarsresultat":-900.00},'
+            '"eiendeler":{"sumEiendeler":1465148.00},"egenkapitalGjeld":{"gjeld":{"sumGjeld":1151360.00}}}]')
+    XML = ('<ArrayList><item><regnskapsperiode><fraDato>2024-01-01</fraDato><tilDato>2024-12-31</tilDato></regnskapsperiode>'
+           '<sumDriftsinntekter>288000.00</sumDriftsinntekter><driftsresultat>-1250.50</driftsresultat><aarsresultat>-900.00</aarsresultat>'
+           '<sumEiendeler>1465148.00</sumEiendeler><sumGjeld>1151360.00</sumGjeld></item></ArrayList>')
+
+    def profile(self) -> dict:
+        profile = verified_profile(ORG, "TESTSELSKAP NORD AS", "https://www.example.no/")
+        evidence = profile["evidence"]
+        evidence["registry_live"] = {"status": "available", "source_url": f"https://data.brreg.no/enhetsregisteret/api/enheter/{ORG}",
+                                     "retrieved_at": T, "content_sha256": HASH_PAGE, "value": {"name": "TESTSELSKAP NORD AS", "legal_form": "ASA", "latest_submitted_accounts": "2025"}}
+        evidence["accounting_obligation"] = {"status": "available", "value": {"classification": "required", "latest_submitted_accounts": "2025"}}
+        evidence["financials"] = {"status": "available", "source_url": f"https://data.brreg.no/regnskapsregisteret/regnskap/{ORG}",
+                                  "retrieved_at": T, "content_sha256": HASH_PAGE, "value": {"records": [{
+                                      "period": {"fraDato": "2024-01-01", "tilDato": "2024-12-31"}, "revenue": 288000.0,
+                                      "operating_result": -1250.5, "annual_result": -900.0, "assets": 1465148.0, "debt": 1151360.0}]}}
+        return profile
+
+    def test_accounts_spans_are_verbatim_in_json_and_xml(self):
+        env = envelope(self.profile())
+        accounts = [e for e in env["evidence"] if "regnskapsregisteret" in e["source_url"]]
+        self.assertEqual(len(accounts), 7)  # five figures, period end, period start
+        for item in accounts:
+            self.assertIn(item["claim_span"], self.JSON)
+            self.assertIn(f">{item['claim_span']}<", self.XML)
+            self.assertEqual(item["effective_at"], "2024-12-31")
+
+    def test_filing_year_cites_the_live_record(self):
+        env = envelope(self.profile())
+        evidence = {e["id"]: e for e in env["evidence"]}
+        claim = next(c for c in env["claims"] if c["field"] == "accounting_obligation")
+        cited = [evidence[i] for i in claim["evidence_ids"] if i in evidence]
+        self.assertIn('"sisteInnsendteAarsregnskap":"2025"', [e["claim_span"] for e in cited])
+        self.assertFalse(any("lastned/csv" in e["source_url"] for e in cited))
 
 
 if __name__ == "__main__":
