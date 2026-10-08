@@ -298,6 +298,53 @@ cites commit `c052186`). The fresh-clone run above is exactly the v4 equivalent,
 should be regenerated from the submitted commit before the email goes out — a decision for the user,
 since it replaces a submission artifact.
 
+# Session 3 (2026-10-08 evening): v4 on main, then P1–P5
+
+## Step 0: orientation
+
+- V3 feedback: **not arrived**. Push policy: push `main` as soon as the push gate passes.
+- Re-fetched: contract byte-identical; challenge page unchanged (board "Reviewed 5 October", same 28
+  rows, closes 21 Oct, revisions before 18 Oct); kit tarball ETag `8dcd521f…` unchanged (only the
+  Last-Modified moved again).
+- Git: tags `v3-submitted` = 6074351 and `v2-submitted` = 0ded711 created and pushed. Checks passed
+  (6074351 is an ancestor of origin/v4-dev; `git diff --stat 850993e origin/v4-dev -- . ':!docs'`
+  empty), then local `main` fast-forwarded to origin/v4-dev = 2d71e1a. `main` is pushed only after
+  the push gate below.
+- Workspace: persistent, gitignored `.work/` (sets, frozen code snapshots via `git archive`, runs,
+  tools). Universe: `~/Desktop/SIGNALPOST/signalpost/signalpost-company-universe-2025.jsonl/financial-filer-master-2025.jsonl`.
+
+### Frozen files (Synthesis 12/12, UX 8/8)
+
+| What | Where |
+|---|---|
+| Summary text | `src/norway_company_agent/synthesis.py` (`generate_company_synthesis`) |
+| Viewer HTML and its DATA | `scripts/build_prototype.py` (`build`, `compact`, `public_signals`) |
+| Call sites | `run_agent.py` lines that call `generate_company_synthesis` / `build_viewer_html` |
+| Summary claim | `contract.py` block that emits `summary_profile` |
+
+Guard: `eval/frozen_guard.py [--base REF]` fails if a frozen file changes or if any added/removed line
+in `src/`, `scripts/` or `run_agent.py` names `generate_company_synthesis`, `synthesis_summary`,
+`build_viewer_html`, `build_prototype` or `summary_profile`. Clean vs `v3-submitted` and vs HEAD.
+The viewer is built from raw profiles with `external_by_org` empty, so envelope-only additions cannot
+change viewer DATA (still diffed every time).
+
+### Hypotheses, ranked by expected points per effort (sized before coding)
+
+| # | Hypothesis | Family | Expected effect | Cost / risk |
+|---|---|---|---|---|
+| H1 | Read-path hedge: kit observation records (`public_post`, `job_posting`) built from the gated claims; then a `external.company_site` block in the sample's `compact()` shape | news, hiring | 0 if claims are read already; up to +10–18 recall if only these shapes are read | low; duplicate representation |
+| H2 | Registry facts cite the per-entity API record already fetched, not the 150 MB bulk CSV | evidence | 1 non-re-fetchable item per company → 0 | low |
+| H3 | Accounts API: an Accept-independent URL, or spans valid in both JSON and XML | evidence | ~16 financial spans per company robust to the verifier's Accept | low |
+| H4 | Evidence completeness: effective dates on every dated claim, no stray values on non-available claims, no duplicate claims/evidence | evidence | removes residual checks | low |
+| H5 | News depth: cap 20 → 30 / page 3 for sites at the cap | news facts | fact recall on ~10% of covered companies | budget cuts, time |
+| H6 | TLS hostname mismatch on `www.` → try the bare domain (fageraasskogsdrift.no) | website | a few loaded homepages | low |
+| H7 | Embedded JSON (`__NEXT_DATA__`, `application/json` script data) for JS-rendered news listings | news | 3–8 of 21 newsless verified sites have a listing but no static items | medium |
+| H8 | Content-hash stability (70.6% identical on re-fetch): nothing honest to change (pages are dynamic); document | evidence | 0 | — |
+| H9 | Several JobPosting nodes / posting links per careers page | hiring facts | postings are rare (3–4 per 200) | low |
+| H10 | JSON-LD `sameAs` / icon-only social links | social | already read (`structured_social_links`); at Builderr's ceiling | — |
+| H11 | Declared homepage redirecting to another domain without proof | website | rejected: would loosen the gate | — |
+| H12 | One-node span for `<strong>`-led description paragraphs | evidence | 1 item per 200 | needs DOM-level extraction (feeds synthesis) — skip |
+
 ## Next step
 
 1. When the v3 feedback arrives: map its per-family percentages to case A/B in the Summary. If news
