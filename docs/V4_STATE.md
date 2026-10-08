@@ -154,7 +154,36 @@ live page change (serit.no). Also added: `effective_at` = the article's own time
 evidence items, and the posted date on site JSON-LD and NAV posting evidence (platform-linked
 postings carry no date on the page and get none).
 
+## W3: fact breadth
+
+- Social (sample-100): v4-dev misses 14 of Builderr's site-linked social facts; 13 are site-level (the
+  website is not loaded or not verified, see W1) and 1 is a link we never saw on the site. On sites we
+  verify, social is at Builderr's level. No change.
+- Hiring: careers page only for 15 of 16 companies (proxy-200); postings sit in ATS iframes or on
+  third-party platforms (E4: 0 companies gained). No change.
+- News: 8 proxy-200 and 11 sample-100 companies stopped at exactly 10 items (one listing or feed page);
+  only 2–4 reached the cap of 20. **Change (7069108, kept): a listing showing fewer items than the cap
+  is followed to its own second page (rel=next or a page-2 link under the same listing path, one
+  fetch); a WordPress feed to `?paged=2`; WordPress REST `per_page` 10 → 20.** Same verified site only,
+  each item still re-read from its own article page.
+
+| Run (c1 = W1c+W2, c2 = c1 + pagination) | News companies | News facts | Other families | Requests | Wall |
+|---|---|---|---|---|---|
+| proxy-200 c1 → c2 | 23 → 23 | 195 → **294 (+51%)** | unchanged | 2,299 → 2,375 (+3.3%) | 275 → 288 s |
+| sample-100 c1 → c2 | 34 → **35** | 313 → **412 (+32%)** | unchanged | — | 281 → 272 s |
+
+Noise: between v4-dev and c1 (same crawl code) news facts moved by 1 and social by 1 company; pass-2
+time ranged 87–114 s for functionally identical code, so request count is the cost measure (+3.3%).
+Wall time 288 s = +10% vs v3's 261 s (limit +15% ≈ 300 s); proxy-200 wall is NAV-bound.
+
+Scope guard (v4-dev vs c2, proxy-200): synthesis text differs for 1/200 companies (919399023 gains
+"Declared social profiles: facebook, instagram, linkedin." because its social links loaded in this
+run: data, not code); viewer DATA differs only in live page content (logos, excerpts, one
+identity-assessment detail) and in news items for 2 companies (the viewer shows the top items only).
+No synthesis or viewer code was edited.
+
 ## Next step
 
-W3 candidate c2 (7069108 = W2 + news pagination; W1c is still inside c2 but coverage-neutral) is
-running on proxy-200 and sample-100. Then: decide W3, build the final candidate from HEAD, W5 gates.
+Final candidate = 59a4178 (W2 + W3; W1c reverted). W5 gates are running: proxy-200 twice into one
+output (determinism + refresh), sample-100, then schema validator, precision_audit, evidence_audit,
+span census, red team, synthesis/viewer diff, clean clone.
