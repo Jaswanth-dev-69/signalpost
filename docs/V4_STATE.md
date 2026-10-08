@@ -409,6 +409,32 @@ as observations, which is what the hedge emits.
 | Envelope size | 7.6 / 5.2 MB | 7.8 / 5.9 MB |
 | Mirror (sample-100) | A 20.52, B 42.18 | A **20.52**, B **41.96**, hedge-only reader **41.96** (was 20.52) |
 
+## P4 refresh correctness (ba77e4d, kept)
+
+Found by the c1 determinism pair (proxy-200 run twice into one file): **27 change events**, all for
+926768735 (fodebagen.no, a discovered site). In run 1 its candidate failed transiently, discovery
+recorded a plain "no website" and run 2's site came back as 27 "added" facts: false changes from
+the same snapshot. Cause: refresh suppresses changes only after a budget-cut crawl or a failed page,
+and a discovery miss was neither.
+
+Fix: a candidate that fails transiently (timeout, reset, 429/5xx; a temporary DNS failure `EAI_AGAIN`,
+now distinguished from "no such name", gets one more try) or a deadline cut marks
+`web_run.discovery.incomplete`; refresh then reports no website change for that company in either
+direction (`website` listed as not refreshed; claims preserved or newly observed).
+
+| Variant | Coverage vs main (proxy-200 / sample-100) | Determinism pair | Summed latency vs v3 (proxy / sample) | Verdict |
+|---|---|---|---|---|
+| c2 = flag + one retry per failing candidate | equal / equal | 0 change events | +10.9% / +29.9% (retries re-wait on hanging domains) | retry dropped: no recovery measured, cost over the rule |
+| **c3 = flag + guard (+ temporary-DNS retry)** | equal / −1 company (913884213 sanomega.as, the same flaky discovery, flagged incomplete) | **0 change events, 0 material** | **+3.8% / +21.0%** (main +5.2% / +20.7%) | **kept** |
+
+Live verification of the guard: c3 sample-100 refreshed on main sample-100 (sanomega.as present in
+main, missed in c3): **0 events** for 913884213, `website` not refreshed, 5 claims preserved. The only
+3 events in that replay are real (997557689 published three posts at 21:10 between the runs).
+Discoveries flagged incomplete: 11 of 200 (proxy-200, the same in both runs) and 4 of 100
+(sample-100). Remaining risk: a transient miss still costs that run the company's web facts (about
+one discovered site per 100–200 companies per run); a cheap retry of fast failures only (reset,
+429/5xx, not timeouts) is the next thing to size.
+
 ## Next step
 
 1. When the v3 feedback arrives: map its per-family percentages to case A/B in the Summary. If news
