@@ -75,3 +75,19 @@ Each question names the exact choice it decides for us. A one-word answer is eno
     which your own gate marks non-exact. Should a shared or group domain count for (a) the group's top
     entity only, (b) every declarant, or (c) none, and is publishing it with `relationship:
     group_site` acceptable?
+
+## G. v4 (2026-10-08)
+
+15. **Span checks on JSON APIs.** Our financial evidence cites
+    `https://data.brreg.no/regnskapsregisteret/regnskap/{org}` with a compact-JSON span such as
+    `"sumDriftsinntekter":288000.00` and the hash of the JSON bytes we fetched. That API returns JSON to
+    `Accept: */*` (and to Python/curl defaults) but XML to a browser-style Accept. Does your span check
+    request JSON, or should spans for this source be written so they match both representations?
+16. **Website records with `publishable:false`.** Our local mirror of your formula only reproduces the
+    kit's 13.07 vs our v2's 8.05 if a kit-profile website record with `status: available` counts as a
+    website fact even when `identity_assessment.publishable` is false. Is that how the kit profile is
+    read? If so, is such a record checked for precision like a published claim?
+17. **News and hiring read path.** No board entry before v3 had news or hiring above 0%, so we cannot
+    tell from scores how these families are read. v3 and v4 emit one `dated_news` claim per article
+    (`value` = `"Title (published_at)"`, plus `title`, `published_at`, `url`) and one `hiring_signal`
+    claim per careers page or posting (`value` = URL, `kind`). Are these read, and if not, which shape is?
