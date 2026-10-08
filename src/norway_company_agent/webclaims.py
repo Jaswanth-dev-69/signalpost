@@ -670,7 +670,7 @@ def _next_listing_page(listing_url: str, soup: BeautifulSoup, domain: str) -> st
     anchors = [(str(anchor.get("href")), False) for anchor in soup.select("a[href]")]
     for href, is_rel_next in rel_next + anchors:
         url = urllib.parse.urldefrag(urllib.parse.urljoin(listing_url, href.strip()))[0]
-        if registered_domain(url) != domain or url.rstrip("/") == listing_url.rstrip("/") or not url.startswith(base):
+        if registered_domain(url) != domain or url.rstrip("/") == listing_url.rstrip("/") or not url.startswith((base + "/", base + "?")):
             continue
         if is_rel_next or PAGE_TWO.search(url):
             return url

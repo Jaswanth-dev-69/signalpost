@@ -96,6 +96,7 @@ class NewsPagination(unittest.TestCase):
 
     def test_other_sections_and_other_sites_are_not_followed(self):
         self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="/produkter/page/2/">x</a>'))
+        self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="/nyheter-arkiv/page/2/">x</a>'))
         self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="https://other.no/nyheter/page/2">x</a>'))
 
 

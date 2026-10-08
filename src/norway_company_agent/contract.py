@@ -718,7 +718,6 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
     if web_status == "available":
         # Website fetched but the strict entity gate did not pass: publish nothing from it.
         web_url = web_val.get("final_url") or web_rec.get("source_url")
-        span = web_val.get("title") or web_url
         ev = add_evidence(web_url, "company_owned", web_rec.get("retrieved_at"), web_val.get("content_sha256") or web_rec.get("content_sha256"), web_val.get("title"), "website_quarantined")
         state, evs = "ambiguous", [ev, hjemmeside_ev]
     elif deadline_hit and not web_status:
