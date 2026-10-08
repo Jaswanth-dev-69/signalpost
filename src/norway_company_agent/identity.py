@@ -89,9 +89,6 @@ def assess_website_identity(profile: dict[str, Any]) -> dict[str, Any]:
     )):
         score = 1.0
         reasons.append("exact organisation number appears on a contact/about/privacy page of the site")
-    elif org_digits and own_org_number_printed(profile, value):
-        score = 1.0
-        reasons.append("exact organisation number printed on the site (footer, structured data or identity page), no other organisation number")
     elif len(core) >= 2 and exact_homepage_name:
         score = 0.95
         reasons.append("all normalized legal-name tokens appear together in homepage identity evidence")
@@ -223,17 +220,11 @@ DECLARED_DOMAIN_REJECT = {
     # Wrong-company hit in declared_domain_audit (national church site shared by 666 parishes).
     "kirken.no",
 }
-# Digit groups may be joined by a space, no-break space, dot or hyphen ("985 123 456", "985.123.456").
-ORG_GROUP_SEPARATOR = r"[\s.\-  ]?"
 ORG_NUMBER_IN_CONTEXT = re.compile(
-    r"(?:org(?:anisasjons|anization|anisation)?\.?\s*-?\s*(?:nr|nummer|no|number)\.?|foretaks(?:nr|nummer)\.?|foretaksregisteret"
-    r"|business\s+reg(?:istration)?\.?\s*(?:no|number)\.?|company\s+reg(?:istration)?\.?\s*(?:no|number)\.?|\bNO)"
-    r"\s*[:.]?\s*-?\s*(\d{3}" + ORG_GROUP_SEPARATOR + r"\d{3}" + ORG_GROUP_SEPARATOR + r"\d{3})(?!\d)",
+    r"(?:org(?:anisasjons)?\.?\s*-?\s*(?:nr|nummer|no|number)\.?|foretaksregisteret|business\s+reg(?:istration)?\.?\s*(?:no|number)\.?|\bNO)"
+    r"\s*[:.]?\s*(\d{3}\s?\d{3}\s?\d{3})(?!\d)",
     re.I,
 )
-# Any 9-digit run, with or without group separators, that is not part of a longer number.
-NINE_DIGITS = re.compile(r"(?<!\d)(?<!\d[.\-])(\d{3}" + ORG_GROUP_SEPARATOR + r"\d{3}" + ORG_GROUP_SEPARATOR + r"\d{3})(?!\d|[.\-]\d)")
-STRUCTURED_ID_KEYS = {"vatid", "taxid", "identifier", "organizationnumber", "orgnr", "organisationnumber"}
 
 
 def valid_org_number(value: str) -> bool:
@@ -253,47 +244,6 @@ def org_numbers_in_text(text: str) -> list[str]:
         if valid_org_number(digits) and digits not in found:
             found.append(digits)
     return found
-
-
-def org_numbers_anywhere(text: str) -> list[str]:
-    """Every valid organisation number printed in the text, labelled or not (footer lines such as
-    "Firma AS | 985 123 456 | Storgata 1" carry no label)."""
-    found = []
-    for match in NINE_DIGITS.finditer(text or ""):
-        digits = re.sub(r"\D", "", match.group(1))
-        if valid_org_number(digits) and digits not in found:
-            found.append(digits)
-    return found
-
-
-def structured_org_numbers(value: Any) -> list[str]:
-    """Organisation numbers in JSON-LD identifier fields (vatID "NO985123456MVA", taxID, identifier)."""
-    found: list[str] = []
-
-    def walk(node: Any, key: str = "") -> None:
-        if isinstance(node, dict):
-            for child_key, child in node.items():
-                walk(child, child_key.casefold() if child_key.casefold() in STRUCTURED_ID_KEYS else key)
-        elif isinstance(node, list):
-            for child in node:
-                walk(child, key)
-        elif key and isinstance(node, (str, int)):
-            digits = re.sub(r"\D", "", str(node))
-            if len(digits) == 9 and valid_org_number(digits) and digits not in found:
-                found.append(digits)
-
-    walk(value)
-    return found
-
-
-def own_org_number_printed(profile: dict[str, Any], value: dict[str, Any]) -> bool:
-    """The site prints the entity's own organisation number and no other one: anywhere in the
-    captured homepage or identity pages (labelled or not) or in its JSON-LD identifiers. A page that
-    also prints another valid organisation number (a group or directory page) never qualifies."""
-    org = str(profile.get("organisation_number") or "")
-    printed = set(value.get("_org_numbers_anywhere") or []) | set(structured_org_numbers(value.get("structured_organisations") or []))
-    labelled = set(value.get("org_numbers_on_site") or [])
-    return bool(org) and printed == {org} and labelled <= {org}
 
 
 def registry_declared_assessment(profile: dict[str, Any], website: dict[str, Any]) -> dict[str, Any]:

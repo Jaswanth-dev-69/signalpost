@@ -1,5 +1,4 @@
-"""v4: organisation-number detection (W1c). The entity's own number counts wherever the site prints
-it, in any common format, but never on a page that also prints another organisation's number."""
+"""v4: evidence spans and effective dates (W2) and news pagination (W3)."""
 from __future__ import annotations
 
 import sys
@@ -9,76 +8,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from norway_company_agent.domain_solver import strict_discovered_proof  # noqa: E402
-from norway_company_agent.identity import (  # noqa: E402
-    assess_website_identity,
-    org_numbers_anywhere,
-    org_numbers_in_text,
-    own_org_number_printed,
-    structured_org_numbers,
-)
-from norway_company_agent.website import strip_private_fields  # noqa: E402
 from norway_company_agent.webclaims import _listing_inline_items, _next_listing_page  # noqa: E402
 from test_contract_rev3 import HASH_PAGE, T, available, envelope, verified_profile  # noqa: E402
 from bs4 import BeautifulSoup  # noqa: E402
 
-ORG, OTHER = "923609016", "916300484"
-
-
-def profile(name: str = "TESTSELSKAP NORD AS") -> dict:
-    return {"organisation_number": ORG, "name": name, "municipality": "OSLO"}
-
-
-def site(printed: list[str], labelled: list[str] | None = None, structured: list | None = None) -> dict:
-    return {"final_url": "https://www.example.no/", "title": "Forside", "description": "", "main_text_excerpt": "Velkommen",
-            "pages": [], "org_numbers_on_site": labelled or [], "_org_numbers_anywhere": printed,
-            "structured_organisations": structured or []}
-
-
-class OrgNumberDetection(unittest.TestCase):
-    def test_unlabelled_dotted_hyphenated_and_vat_forms_are_found(self):
-        for text in ("Testselskap AS | 923 609 016 | Storgata 1", "923.609.016", "923-609-016", "NO923609016MVA", "org nr: 923 609 016"):
-            self.assertEqual(org_numbers_anywhere(text), [ORG], text)
-
-    def test_digits_inside_longer_numbers_are_not_org_numbers(self):
-        for text in ("tel 1923609016", "konto 1.923.609.016", "9236090160"):
-            self.assertEqual(org_numbers_anywhere(text), [], text)
-
-    def test_more_labels_and_separators_are_read_as_labelled_numbers(self):
-        for text in ("Foretaksnr 923 609 016", "Organization number: 923609016", "Company reg. no. 923.609.016", "Org.nr.923-609-016"):
-            self.assertEqual(org_numbers_in_text(text), [ORG], text)
-
-    def test_jsonld_identifiers(self):
-        nodes = [{"@type": "Organization", "vatID": "NO923609016MVA"}, {"identifier": {"@type": "PropertyValue", "value": "923 609 016"}}, {"taxID": "12"}]
-        self.assertEqual(structured_org_numbers(nodes), [ORG])
-
-    def test_own_number_alone_is_proof(self):
-        self.assertTrue(own_org_number_printed(profile(), site([ORG])))
-        self.assertTrue(own_org_number_printed(profile(), site([], structured=[{"vatID": f"NO{ORG}MVA"}])))
-
-    def test_page_printing_another_number_is_never_proof(self):
-        self.assertFalse(own_org_number_printed(profile(), site([ORG, OTHER])))
-        self.assertFalse(own_org_number_printed(profile(), site([ORG], labelled=[OTHER])))
-        self.assertFalse(own_org_number_printed(profile(), site([])))
-
-    def test_discovered_domain_accepts_own_unlabelled_number_only(self):
-        accepted, reason = strict_discovered_proof(profile(), site([ORG]))
-        self.assertTrue(accepted)
-        self.assertIn("printed on the site", reason)
-        self.assertFalse(strict_discovered_proof(profile(), site([ORG, OTHER]))[0])
-
-    def test_registry_homepage_identity_uses_the_same_rule(self):
-        value = site([ORG])
-        verdict = assess_website_identity({**profile(), "evidence": {"website": {"value": value}}})
-        self.assertEqual((verdict["status"], verdict["publishable"]), ("exact", True))
-        value = site([ORG, OTHER])
-        verdict = assess_website_identity({**profile(), "evidence": {"website": {"value": value}}})
-        self.assertFalse(verdict["publishable"])
-
-    def test_printed_numbers_are_never_serialized(self):
-        record = {"value": site([ORG])}
-        strip_private_fields(record)
-        self.assertNotIn("_org_numbers_anywhere", record["value"])
+ORG = "923609016"
 
 
 class EvidenceSpans(unittest.TestCase):
