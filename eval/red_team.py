@@ -141,7 +141,7 @@ def run_red_team(universe_path: Path, output_report_path: Path, count: int = 35)
 
 
 if __name__ == "__main__":
-    u_path = Path("/home/altf4/Desktop/signalpost/signalpost-company-universe-2025.jsonl/financial-filer-master-2025.jsonl")
+    u_path = Path(sys.argv[1] if len(sys.argv) > 1 else "/home/altf4/Desktop/signalpost/signalpost-company-universe-2025.jsonl/financial-filer-master-2025.jsonl")
     rep_path = Path("eval/red_team_report.json")
     rep = run_red_team(u_path, rep_path, count=35)
     sys.exit(0 if rep["passed"] else 1)
