@@ -234,9 +234,10 @@ itself is re-timed today under the same NAV conditions.
 | Coverage vs v4-dev (sample-100) | website 72, description 67, social 40 unchanged; news 34 → **35** companies, 312 → **412** facts (+32%); hiring 20 = 20 |
 | Synthesis / viewer diff vs v4-dev | synthesis text differs for 1/200 (Flav: social links loaded in this run); viewer DATA differs only in live page content and news items of 3–4 companies. No synthesis or viewer code edited |
 | Runtime | proxy-200 wall is NAV-bound: v3 re-timed today **288 s** (NAV done 286.8 s); fin2 327 s (overlapping the red team) and 306 s → +6% to +13.5% vs v3 today. Web pass (code-dependent): v3 84 s, v4-dev 87 s, fin2 101–102 s (tail: slow sites now use their full 60 s budget). Throughput (summed request latency, what a 1,500 run scales with): v3 1,227 s, v4-dev 1,342 s, fin2 1,364 s = **+11% vs v3, +1.6% vs v4-dev**. 1,500-company estimate ≈ 15 + 150 + 916 ≈ 1,080 s (v3 ≈ 990 s), under the 1,500 s hard deadline |
+| Clean clone (850993e, from GitHub) | fresh clone, no venv before install, `uv sync` exit 0 (warm uv cache; rev3 covered a cold install), `uv run signalpost --organisations docs/smoke-test/smoke-companies.jsonl --output … --bulk …`: exit 0 in 268 s, **100/100 envelopes, schema 0 errors** |
 | Budget-cut crawls (per-company 60 s web budget) | 1–2 → 4 (proxy-200), 2 → 5 (sample-100); each cut company gained 10 news items and lost nothing; cuts only set `web_claims.crawl_complete=false` (used by refresh to avoid false removals), never an envelope state |
 
 ## Next step
 
-Pending: clean clone of 850993e, parity runs of 850993e on proxy-200 and sample-100,
-full span census on the final output. Then the final summary.
+Pending: parity runs of 850993e on proxy-200 and sample-100, full span census on the final output.
+Then the final summary.
