@@ -345,6 +345,34 @@ change viewer DATA (still diffed every time).
 | H11 | Declared homepage redirecting to another domain without proof | website | rejected: would loosen the gate | — |
 | H12 | One-node span for `<strong>`-led description paragraphs | evidence | 1 item per 200 | needs DOM-level extraction (feeds synthesis) — skip |
 
+## Baselines today (2026-10-08, `.work/runs`)
+
+| Run | proxy-200 web / news / hiring (companies; facts) | sample-100 | Web pass | Summed request latency | 1,500 projection |
+|---|---|---|---|---|---|
+| v3 6074351 | 44 / 23; 164 / 15; 17 | 72 / 35; 253 / 18; 22 | 77.4 s / 92.7 s | 1,270 s / 1,239 s | 990 s |
+| main 2d71e1a | 44 / 23; 295 / 16; 18 | 72 / 35; 412 / 20; 24 | 91.3 s / 118.4 s | 1,337 s (+5.2%) / 1,496 s (+20.7%) | 1,033 s / 1,161 s |
+
+Social (22; 45 and 40; 84) and description (41 and 67) are equal in both. Noise floor today: main run 1 vs
+run 2 on proxy-200 differ in **no family** (companies and facts identical). Proxy-200 wall time is
+NAV-bound (274–279 s for every run). Main is already +20.7% vs v3 in summed latency on the
+website-rich sample-100 (+5.2% on proxy-200), so cost-adding changes have no headroom there under
+the +15% rule.
+
+Mirror (sample-100, pool = Builderr's sample + these runs; λ = 1.18 from the earlier kit/v2
+calibration, whose runs were lost with /tmp): case A (kit profile read) v3 = main = 20.52 raw →
+**17.4**; case B (claims read too) v3 39.81 → 33.7, main 42.00 → **35.6**.
+
+## P3 / P4 sizing (offline on the baselines; nothing implemented)
+
+| Hypothesis | Size | Verdict |
+|---|---|---|
+| H5 news cap 20 → 30 | 10/23 (proxy-200) and 14/35 (sample-100) news companies sit at the cap: up to ~100–140 more facts, at +4–6% requests and more budget cuts | Rejected: breaks the +15%-of-v3 cost rule on sample-100 (already +20.7%); 0 in case A |
+| H7 embedded JSON (`__NEXT_DATA__`, `__NUXT__`) on newsless verified sites | 0 of 21 checked pages; 2 carry one JSON-LD `datePublished` (the page's own), already parsed | Rejected (0) |
+| H9 several postings per careers page | postings found: 0 (proxy-200), 1 (sample-100) | Rejected (0) |
+| H10 JSON-LD `sameAs` / icon-only social links | already read (`structured_social_links`, all anchors) | No change |
+| H6 / P4 TLS hostname mismatch → bare domain | registry homepages not loaded: proxy-200 dns 4, robots 2, HTTP 500 2, empty document 1, TLS mismatch 1; sample-100 timeout 1, HTTP 403 1. The TLS case fails on both `www.` and bare host (certificate for another host); the empty one is a 239-byte stub; registry homepages already retry www/bare and http | Rejected (0 recoverable) |
+| P5 discovery | no new idea; no search API offered | Not started |
+
 ## Next step
 
 1. When the v3 feedback arrives: map its per-family percentages to case A/B in the Summary. If news
