@@ -6,7 +6,7 @@ import unicodedata
 from typing import Any
 
 from .identity import DECLARED_DOMAIN_REJECT, _structured_names, _tokens, apply_website_identity_gate, publishable_social_links
-from .website import fetch_website
+from .website import RETRYABLE, fetch_website
 
 FREEMAIL_DOMAINS = {
     "gmail.com", "googlemail.com", "hotmail.com", "hotmail.no", "outlook.com", "outlook.no", "live.no", "live.com",
@@ -184,7 +184,10 @@ def discover_website_by_domain_search(
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Deterministic candidate-domain discovery. Only strict on-page proof is accepted; the
     registry_declared_domain rule never applies here."""
-    total_metrics = {"requests": 0, "bytes": 0, "latencies_ms": [], "candidates": 0}
+    # "incomplete": a candidate failed transiently (timeout, reset, 429/5xx, a temporary DNS failure
+    # after one more try) or the deadline cut the list, so
+    # "no site found" is not a finding; refresh then reports no website change for this company.
+    total_metrics = {"requests": 0, "bytes": 0, "latencies_ms": [], "candidates": 0, "transient_errors": 0, "incomplete": False}
     if str(profile.get("legal_form") or "").upper() in SKIP_DISCOVERY_FORMS:
         return None, total_metrics
     candidates: list[tuple[str, str]] = []
@@ -198,10 +201,17 @@ def discover_website_by_domain_search(
         if key in seen:
             continue
         if deadline is not None and time.monotonic() > deadline:
+            total_metrics["incomplete"] = True
             break
         seen.add(key)
         total_metrics["candidates"] += 1
         website_record, metrics = fetch_website(candidate_url, timeout=timeout)
+        if "failed temporarily" in str(website_record.get("note") or ""):
+            # A temporary DNS failure is not "no such domain": one more try after a pause.
+            time.sleep(1.5)
+            website_record, again = fetch_website(candidate_url, timeout=timeout)
+            metrics = {key_: metrics.get(key_, 0) + again.get(key_, 0) for key_ in ("requests", "bytes")} | {
+                "latencies_ms": [*metrics.get("latencies_ms", []), *again.get("latencies_ms", [])]}
         if website_record.get("status") == "blocked" and "did not resolve" in str(website_record.get("note") or ""):
             # Some sites only answer on the bare domain.
             website_record, apex_metrics = fetch_website("https://" + key, timeout=timeout)
@@ -214,6 +224,10 @@ def discover_website_by_domain_search(
         total_metrics["bytes"] += metrics.get("bytes", 0)
         total_metrics["latencies_ms"].extend(metrics.get("latencies_ms", []))
         if website_record.get("status") != "available":
+            note = str(website_record.get("note") or "")
+            if (website_record.get("status") == "source_error" and RETRYABLE.search(note)) or "failed temporarily" in note:
+                total_metrics["transient_errors"] += 1
+                total_metrics["incomplete"] = True
             continue
         gated = apply_website_identity_gate(profile, website_record)
         gated_website = gated["website"]

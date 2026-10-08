@@ -8,6 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from norway_company_agent import domain_solver  # noqa: E402
+from norway_company_agent.envelope_refresh import refresh_envelope  # noqa: E402
 from norway_company_agent.external_footprint import validate_observation  # noqa: E402
 from norway_company_agent.webclaims import _listing_inline_items, _next_listing_page  # noqa: E402
 from test_contract_rev3 import HASH_PAGE, T, available, envelope, verified_profile  # noqa: E402
@@ -186,6 +188,44 @@ class RegistryAndAccountsSpans(unittest.TestCase):
         cited = [evidence[i] for i in claim["evidence_ids"] if i in evidence]
         self.assertIn('"sisteInnsendteAarsregnskap":"2025"', [e["claim_span"] for e in cited])
         self.assertFalse(any("lastned/csv" in e["source_url"] for e in cited))
+
+
+
+class IncompleteDiscovery(unittest.TestCase):
+    """P4: a discovery that stopped on a transient error is no finding, so refresh reports no website
+    change when the site shows up (or vanishes) in the other run."""
+
+    def test_transient_failure_marks_discovery_incomplete(self):
+        calls = []
+
+        def fake_fetch(url, timeout=0, retries=0):
+            calls.append((url, retries))
+            return {"status": "source_error", "note": "URLError: timed out"}, {"requests": 2, "bytes": 0, "latencies_ms": [6000]}
+        saved = domain_solver.fetch_website
+        domain_solver.fetch_website = fake_fetch
+        try:
+            site, metrics = domain_solver.discover_website_by_domain_search({"organisation_number": ORG, "name": "FODEBAGEN AS", "legal_form": "AS", "evidence": {}})
+        finally:
+            domain_solver.fetch_website = saved
+        self.assertIsNone(site)
+        self.assertTrue(metrics["incomplete"])
+        self.assertTrue(calls)
+
+    def test_no_website_change_after_an_incomplete_discovery(self):
+        url = "https://www.example.no/nyheter/ny-avtale"
+        news = {"title": "Ny avtale", "url": url, "published_date": "2025-09-22", "published_at": "2025-09-22T20:00:00+02:00",
+                "source_page": url, "content_sha256": HASH_PAGE, "retrieved_at": T, "claim_span": "Ny avtale", "date_span": "2025-09-22"}
+        found = envelope(verified_profile(ORG, "TESTSELSKAP NORD AS", "https://www.example.no/", news=[news]))
+        missed_profile = verified_profile(ORG, "TESTSELSKAP NORD AS", "https://www.example.no/")
+        missed_profile["evidence"]["website"] = {"status": "not_found", "source_url": "https://data.brreg.no/x", "retrieved_at": T, "note": "No valid website found or verified"}
+        missed_profile["web_claims"] = {}
+        missed_profile["web_run"] = {"discovery": {"requests": 2, "candidates": 2, "incomplete": True}}
+        missed = envelope(missed_profile)
+        refresh_envelope(found, missed)
+        self.assertEqual(found["changes"], [])
+        missed_again = envelope(missed_profile)
+        refresh_envelope(missed_again, envelope(verified_profile(ORG, "TESTSELSKAP NORD AS", "https://www.example.no/", news=[news])))
+        self.assertEqual(missed_again["changes"], [])
 
 
 if __name__ == "__main__":

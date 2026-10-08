@@ -76,6 +76,11 @@ def _evidence_key(item: dict[str, Any]) -> tuple:
     return (item.get("source_url"), item.get("claim_span"), item.get("content_sha256"))
 
 
+def _discovery_incomplete(profile: dict[str, Any]) -> bool:
+    """Website discovery stopped on a transient error or the deadline, so its "no site" is no finding."""
+    return bool(((profile.get("web_run") or {}).get("discovery") or {}).get("incomplete"))
+
+
 def refresh_envelope(current: dict[str, Any], previous: dict[str, Any] | None) -> dict[str, Any]:
     """Add `changes` and `refresh` to `current` (in place) relative to `previous`."""
     if not previous or previous.get("organisation_number") != current.get("organisation_number"):
@@ -86,8 +91,14 @@ def refresh_envelope(current: dict[str, Any], previous: dict[str, Any] | None) -
     changes: list[dict[str, Any]] = []
     preserved_fields: set[str] = set()
 
+    # A discovery that stopped early in either run says nothing about a website appearing or going.
+    discovery_incomplete = _discovery_incomplete(old_profile) or _discovery_incomplete(new_profile)
+
     # 1. Kit-tracked profile fields (the kit's own event shape), skipping fields whose source failed.
     for change in diff_profile(old_profile, new_profile):
+        if discovery_incomplete and change["field"].startswith("website."):
+            preserved_fields.add("website")
+            continue
         record = _evidence_for(new_profile, change["field"])
         if _failed(record) or (change["new_value"] is None and record.get("status") != "not_found"):
             preserved_fields.add(change["field"].split(".", 1)[0])
@@ -108,7 +119,8 @@ def refresh_envelope(current: dict[str, Any], previous: dict[str, Any] | None) -
     old_web, new_web = old_profile.get("web_claims") or {}, new_profile.get("web_claims") or {}
     old_errors = {e.get("url") for e in old_web.get("crawl_errors") or [] if isinstance(e, dict)}
     new_errors = {e.get("url") for e in new_web.get("crawl_errors") or [] if isinstance(e, dict)}
-    old_incomplete, new_incomplete = old_web.get("crawl_complete") is False, new_web.get("crawl_complete") is False
+    old_incomplete = old_web.get("crawl_complete") is False or _discovery_incomplete(old_profile)
+    new_incomplete = new_web.get("crawl_complete") is False or _discovery_incomplete(new_profile)
     unconfirmed: dict[str, list[Any]] = {"unconfirmed_removals": [], "newly_observed": [], "no_longer_listed": []}
 
     def claim_urls(claim: dict[str, Any]) -> set[Any]:

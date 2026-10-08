@@ -63,6 +63,8 @@ def assert_public_url(url: str) -> None:
     try:
         addresses = {item[4][0] for item in socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)}
     except socket.gaierror as exc:
+        if exc.errno == socket.EAI_AGAIN:
+            raise ValueError("Hostname lookup failed temporarily") from exc
         raise ValueError("Hostname did not resolve") from exc
     for address in addresses:
         ip = ipaddress.ip_address(address)
