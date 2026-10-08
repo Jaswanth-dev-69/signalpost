@@ -277,8 +277,32 @@ families; Q7 which evidence checks cost points; Q10/Q11 time budget and snapshot
 `external.handles`; Q14 group sites (Elopak); Q15 span format for the accounts API (JSON vs XML);
 Q16 whether `publishable:false` website records count.
 
+## Packaging checks (2026-10-08, nothing sent)
+
+| Check | Result |
+|---|---|
+| `git diff --stat 850993e HEAD -- . ':!docs'` | **empty**: every commit after the candidate is docs-only |
+| Remote state | `origin/v4-dev` = `3b20ac6` = local HEAD; `origin/main` = `6074351476c4a005aed246f5f6eb7c7adb28244d` (v3, untouched) |
+| Fresh clone from GitHub, **cold package cache** | clone of `3b20ac6` into a new empty directory, `UV_CACHE_DIR` an empty dir (0 entries → 82 MB), no `.venv` before install. `uv sync` exit 0 in **4 s**; `uv run python run_agent.py --organisations docs/smoke-test/smoke-companies.jsonl --output <tmp> --bulk <snapshot>` exit 0 in **266 s** |
+| Envelopes from that clone | **100/100**, unique, input order preserved, all terminal; schema validator **0 errors**; run errors none; NAV index complete; 848 requests, p50 291 ms, p95 2,070 ms; claims 1,902 available / 617 not_available / 15 ambiguous / 5 blocked, and **0 non-available claims carrying a value** |
+| Unit tests | **149 pass** |
+| Submission email | drafted in `docs/V4_EMAIL.md` with `<HASH>` and `<CONTACT EMAIL>` placeholders; questions 1–6 of `QUESTIONS_FOR_BUILDERR.md` included (Q16 folded into question 6) |
+
+Housekeeping: the session scratchpad (worktrees, run outputs, tools) was wiped by temp cleanup
+between sessions, so the nine stale git worktrees were pruned; only the main checkout remains. Run
+outputs from the earlier W0–W5 work are gone, but every tool that produced them is committed in
+`eval/`.
+
+**Open packaging gap:** `docs/smoke-test/` is still the rev3 artifact (its README says "rev3" and
+cites commit `c052186`). The fresh-clone run above is exactly the v4 equivalent, so the smoke test
+should be regenerated from the submitted commit before the email goes out — a decision for the user,
+since it replaces a submission artifact.
+
 ## Next step
 
-When the v3 feedback arrives: map its per-family percentages to case A/B above. If news or hiring is
-still 0.0%, implement W4 hedge 1 (kit observation records) on `v4-dev` with the same gates. Otherwise,
-with the user's go-ahead, package 850993e (smoke test, gist, submission text).
+1. When the v3 feedback arrives: map its per-family percentages to case A/B in the Summary. If news
+   or hiring is still 0.0%, implement W4 hedge 1 (kit observation records) on `v4-dev` with the same
+   gates, and keep v5 as the correction slot.
+2. With the user's go-ahead: regenerate `docs/smoke-test/` from the v4 commit, fast-forward the
+   default branch to the v4 commit, fill `<HASH>` and `<CONTACT EMAIL>` in `docs/V4_EMAIL.md`, and
+   send. Nothing is merged, tagged or sent yet.
