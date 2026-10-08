@@ -566,7 +566,7 @@ def _jsonld_article_items(page: dict[str, Any], soup: BeautifulSoup, domain: str
 
 def _wordpress_posts(fetcher: SiteFetcher, home: dict[str, Any], domain: str) -> list[dict[str, Any]]:
     """WordPress REST API: posts carry their real publication date."""
-    url = urllib.parse.urljoin(home["url"], "/wp-json/wp/v2/posts?per_page=10&_fields=date,link,title")
+    url = urllib.parse.urljoin(home["url"], f"/wp-json/wp/v2/posts?per_page={MAX_NEWS_ITEMS}&_fields=date,link,title")
     page = fetcher.get(url, "news", accept="application/json")
     if not page or "json" not in page.get("content_type", ""):
         return []
@@ -657,6 +657,24 @@ def _sitemap_page_urls(fetcher: SiteFetcher, home_url: str, limit: int = 2000) -
     return [u for u in urls if u and registered_domain(u) == fetcher.domain]
 
 
+PAGE_TWO = re.compile(r"(?:/page/2/?|[?&](?:page|side|paged)=2)$", re.I)
+
+
+def _next_listing_page(listing_url: str, soup: BeautifulSoup, domain: str) -> str | None:
+    """The listing's own second page: a rel=next link, or a page-2 link under the same listing path."""
+    base = listing_url.split("?", 1)[0].rstrip("/")
+    node = soup.select_one('link[rel~="next"][href], a[rel~="next"][href]')
+    hrefs = [str(node.get("href"))] if node is not None else []
+    hrefs += [str(anchor.get("href")) for anchor in soup.select("a[href]")]
+    for href in hrefs:
+        url = urllib.parse.urldefrag(urllib.parse.urljoin(listing_url, href.strip()))[0]
+        if registered_domain(url) != domain or url.rstrip("/") == listing_url.rstrip("/"):
+            continue
+        if (node is not None and href == hrefs[0]) or (url.startswith(base) and PAGE_TWO.search(url)):
+            return url
+    return None
+
+
 def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: BeautifulSoup, extra_links: list[tuple[str, str]]) -> dict[str, Any]:
     domain = fetcher.domain
     links = _same_site_links(home["url"], home_soup, domain) + extra_links
@@ -701,6 +719,15 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
         listing_has_articles = bool(listing_articles)
         for item in _listing_inline_items(listing_page, soup, domain) + _jsonld_article_items(listing_page, soup, domain):
             items.setdefault(item["url"], item)
+        if listing_articles and len(set(articles) | set(items)) < MAX_NEWS_ITEMS:
+            # A listing that shows fewer items than the cap: its second page (one fetch).
+            next_url = _next_listing_page(listing_page["url"], soup, domain)
+            next_page = fetcher.get(next_url, "news") if next_url else None
+            if _is_html(next_page):
+                next_soup = _soup(next_page)
+                articles = list(dict.fromkeys(articles + [u for u, _ in _same_site_links(next_page["url"], next_soup, domain) if is_news_article(u)]))
+                for item in _listing_inline_items(next_page, next_soup, domain) + _jsonld_article_items(next_page, next_soup, domain):
+                    items.setdefault(item["url"], item)
         # The checked page is cited by its own heading or title, verbatim.
         checked.append({**_page_ref(listing_page), "claim_span": _title(soup)})
 
@@ -725,6 +752,11 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
             feed_items = parse_feed(feed, domain)
             for item in feed_items:
                 items.setdefault(item["url"], item)
+            if feed_items and wordpress and len(items) < MAX_NEWS_ITEMS:
+                # WordPress feeds list ten posts per page; the next ten are one fetch away.
+                more = fetcher.get(feed_url.split("?", 1)[0] + "?paged=2", "news", accept="application/rss+xml,application/atom+xml,application/xml,text/xml")
+                for item in parse_feed(more, domain) if more and not _is_html(more) else []:
+                    items.setdefault(item["url"], item)
             if feed_items:
                 feed_found = True
                 break

@@ -18,7 +18,7 @@ from norway_company_agent.identity import (  # noqa: E402
     structured_org_numbers,
 )
 from norway_company_agent.website import strip_private_fields  # noqa: E402
-from norway_company_agent.webclaims import _listing_inline_items  # noqa: E402
+from norway_company_agent.webclaims import _listing_inline_items, _next_listing_page  # noqa: E402
 from test_contract_rev3 import HASH_PAGE, T, available, envelope, verified_profile  # noqa: E402
 from bs4 import BeautifulSoup  # noqa: E402
 
@@ -140,6 +140,25 @@ class EvidenceSpans(unittest.TestCase):
         items = _listing_inline_items(listing, BeautifulSoup(html, "lxml"), "example.no")
         self.assertEqual(len(items), 1)
         self.assertEqual((items[0]["claim_span"], items[0]["date_span"]), ("Ny avtale signert", "12. mars 2026"))
+
+
+
+class NewsPagination(unittest.TestCase):
+    """W3: a listing showing fewer items than the cap is followed to its own second page only."""
+
+    def next_page(self, url: str, html: str) -> str | None:
+        return _next_listing_page(url, BeautifulSoup(html, "lxml"), "example.no")
+
+    def test_page_two_of_the_same_listing(self):
+        self.assertEqual(self.next_page("https://example.no/nyheter/", '<a href="/nyheter/page/2/">2</a>'), "https://example.no/nyheter/page/2/")
+        self.assertEqual(self.next_page("https://example.no/aktuelt", '<a href="/aktuelt?side=2">Neste</a>'), "https://example.no/aktuelt?side=2")
+
+    def test_rel_next(self):
+        self.assertEqual(self.next_page("https://example.no/nyheter", '<link rel="next" href="https://example.no/nyheter?page=2">'), "https://example.no/nyheter?page=2")
+
+    def test_other_sections_and_other_sites_are_not_followed(self):
+        self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="/produkter/page/2/">x</a>'))
+        self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="https://other.no/nyheter/page/2">x</a>'))
 
 
 if __name__ == "__main__":
