@@ -90,6 +90,10 @@ class NewsPagination(unittest.TestCase):
     def test_rel_next(self):
         self.assertEqual(self.next_page("https://example.no/nyheter", '<link rel="next" href="https://example.no/nyheter?page=2">'), "https://example.no/nyheter?page=2")
 
+    def test_rel_next_into_another_section_is_not_followed(self):
+        html = '<link rel="next" href="https://example.no/no/nyheter/page/2/"><a rel="next" href="/news/page/2/">2</a>'
+        self.assertEqual(self.next_page("https://example.no/news/", html), "https://example.no/news/page/2/")
+
     def test_other_sections_and_other_sites_are_not_followed(self):
         self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="/produkter/page/2/">x</a>'))
         self.assertIsNone(self.next_page("https://example.no/nyheter", '<a href="https://other.no/nyheter/page/2">x</a>'))

@@ -26,8 +26,10 @@ import tldextract
 USER_AGENT = "builderr-signalpost-poc/0.1 (+https://builderr.ai)"
 FAMILY_FETCH_CAP = 6
 MAX_NEWS_ITEMS = 20
-# Article pages are fetched so each dated item cites its own page; they have their own budget.
-FETCH_CAPS = {"news_article": MAX_NEWS_ITEMS}
+# Article pages are fetched so each dated item cites its own page; they have their own budget, and
+# re-reading the kept items from their own pages has another (so more listing pages never leave an
+# item citing a feed instead of its article).
+FETCH_CAPS = {"news_article": MAX_NEWS_ITEMS, "news_upgrade": MAX_NEWS_ITEMS}
 MAX_JOB_POSTINGS = 25
 PER_HOST_INTERVAL_S = 0.35
 
@@ -661,16 +663,16 @@ PAGE_TWO = re.compile(r"(?:/page/2/?|[?&](?:page|side|paged)=2)$", re.I)
 
 
 def _next_listing_page(listing_url: str, soup: BeautifulSoup, domain: str) -> str | None:
-    """The listing's own second page: a rel=next link, or a page-2 link under the same listing path."""
+    """The listing's own second page: a rel=next link or a page-2 link, either under the same listing
+    path (a site's rel=next can point at another language section)."""
     base = listing_url.split("?", 1)[0].rstrip("/")
-    node = soup.select_one('link[rel~="next"][href], a[rel~="next"][href]')
-    hrefs = [str(node.get("href"))] if node is not None else []
-    hrefs += [str(anchor.get("href")) for anchor in soup.select("a[href]")]
-    for href in hrefs:
+    rel_next = [(str(node.get("href")), True) for node in soup.select('link[rel~="next"][href], a[rel~="next"][href]')]
+    anchors = [(str(anchor.get("href")), False) for anchor in soup.select("a[href]")]
+    for href, is_rel_next in rel_next + anchors:
         url = urllib.parse.urldefrag(urllib.parse.urljoin(listing_url, href.strip()))[0]
-        if registered_domain(url) != domain or url.rstrip("/") == listing_url.rstrip("/"):
+        if registered_domain(url) != domain or url.rstrip("/") == listing_url.rstrip("/") or not url.startswith(base):
             continue
-        if (node is not None and href == hrefs[0]) or (url.startswith(base) and PAGE_TWO.search(url)):
+        if is_rel_next or PAGE_TWO.search(url):
             return url
     return None
 
@@ -794,7 +796,7 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
     upgraded = []
     for item in ordered:
         if item["source_page"] != item["url"]:
-            page = fetcher.get(item["url"], "news_article")
+            page = fetcher.get(item["url"], "news_upgrade")
             article = article_item(page, _soup(page)) if _is_html(page) else None
             if article and article["url"] not in {i["url"] for i in upgraded}:
                 item = article
