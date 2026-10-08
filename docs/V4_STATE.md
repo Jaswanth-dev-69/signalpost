@@ -81,11 +81,80 @@ Findings:
    about 10–18 recall points, far more than any discovery gain. That is Q2/Q3, and W4 if the v3
    feedback shows 0.0%.
 
-v1 anchor (7.79, older 1,200 fixture) is weaker: v1 proxy-200 run done, sample-100 pending.
+v1 anchor (7.79): **not comparable**. Today v1 (31cf298) publishes 24 websites on proxy-200 and 42 on
+sample-100 (v2: 53 / 73; v1 had no registry-declared rule), and its ambiguous claims carry no value,
+so the mirror puts v1 at 0.45–0.58 × v2 against 0.968 officially. v1 was scored on another batch (the
+1,200 fixture) against an earlier, smaller union, so it cannot test the mirror.
+
+## W1: website discovery on labelled data (no change kept)
+
+Ground truth: the universe (410,638 in the 2026-10-04 snapshot) has 44,793 companies declaring a
+homepage, 28,571 on a domain no other entity declares; 28,340 after excluding platform domains and
+skip forms. Target population (no declared homepage, 365,845): only **9.2% have a company e-mail
+domain** (vs 76% of declarants) and 88% have no registered employees.
+
+(a) Offline recall@k of the generator against declared domains (`eval` scratch tools):
+
+| Generator | Mean candidates (no-homepage companies) | @1 | @3 | @8 |
+|---|---|---|---|---|
+| current (`generate_candidate_domains`) | 3.94 | 37.5% | 47.6% | **48.5%** |
+| challenger: + first distinctive token (.no/.com), names containing a domain, STIFTELSEN stripped, ø→oe, .as, last token; lone tokens only if they occur in ≤ 30 registry names | 5.52 | 38.5% | 53.9% | **58.6%** |
+
+Misses that no name rule can reach: 42% (unrelated brand domains).
+
+(b) Live, 400 labelled companies (stratified none/5-19/20-99/100+ = 200/120/60/20), homepage treated as
+undeclared, every candidate of both generators fetched and judged by the **unchanged** strict proof
+(`eval/discovery_labelled.py`, frozen v4-dev code, 472 s). True site loaded 232/400; passes the
+proof 113/400. Pipeline simulation (first pass wins), weighted to the no-homepage population:
+
+| Config | Gate recall | Other-domain passes | Seconds/company |
+|---|---|---|---|
+| current generator, current proof | 22.3% | 17 | 6.6 |
+| current generator, W1c detection | 22.7% | 17 | 6.6 |
+| challenger, W1c detection | 22.9% | 22 | 8.7 (+32%) |
+
+All 17 other-domain passes of the current code were hand-checked: same entity (own number on an
+alternate domain, or the obvious own site). The challenger adds 3 true sites (ostnes.no,
+skottneset.no via org number; askeladdensteinerbarnehage.no via name) but also 2 unsafe passes via the
+name rule: fasaderehabilitering.no for OSLO FASADEREHABILITERING AS (a generic SEO title, very likely
+another company) and boasas.no/akershave-apartments/ (the managing company's page). **Challenger
+rejected** (fails 0 false positives; even restricted to org-number proofs it is about +2–4 companies
+per 1,500 for about +9% web-pass time).
+
+(c) Proof detection without loosening (commit 23e64da, candidate): own number in any format
+(dotted, hyphenated, no-break space, NO…MVA, unlabelled footer), more labels, JSON-LD
+vatID/taxID/identifier, accepted only when no other valid number is printed. Result: +1/400
+labelled, **0 companies on proxy-200 and sample-100** (identical coverage, same pass-2 time 153 s on
+sample-100). **Reverted** (fa8607e): not above the noise floor.
+
+Why sample-100 sites are missed (live diagnosis of 12 Builderr sites we lack): single-token legal
+names cannot pass the name rule (Slipeteknikk, Solvang, TGS); the registered municipality is not on the
+site (The MICE Guru, Starina, Lapsen); a same-municipality homonym (Nordic Door); a franchise chain
+printing another org number (dolly.no, correctly rejected). With the gate unchanged, discovery is at
+its ceiling; expected gain per 1,500 from any measured W1 change is 0–4 companies.
+
+## W2: evidence
+
+Census tool `eval/span_audit.py` (re-fetch every cited URL once; raw / one-node / visible checks).
+v4-dev proxy-200, all 11,190 evidence items on 1,078 URLs:
+
+| Source | Items | Verbatim before | Cause | Fix |
+|---|---|---|---|---|
+| Regnskapsregisteret API | 3,309 | 100% with `Accept: */*` | The API answers XML to a browser-style Accept; spans are compact JSON (what we fetched and hashed) | none (honest); asked as Q15 |
+| Bulk CSV (Enhetsregisteret) | 400 | 100% in the full CSV record (multi-line records) | — | — |
+| NAV sitemap check | 344 | **0%** | span was our own sentence ("13511 active ads listed; …") | first `<loc>` text node of the fetched sitemap |
+| Ambiguous websites (5 fields + summary) | 180 | **0%** | `"<title> (exact legal entity not established)"` | the title alone |
+| Checked news listings | 12 | **0%** | `"title | page text"` composite | the page's own heading/title |
+| Web claims, other | ~1,500 | 99.4% | listing window across title and date; body-text snippets ±90 chars across nodes | title and date as separate spans; body text quoted tightly (number or name only) |
+
+After the fix (candidate, proxy-200): web families **1,693/1,695 one-node (99.9%)**, NAV **356/356**.
+Residual: 1 description paragraph that starts with a `<strong>` name (p22.no; passes the visible-text
+check, a one-node span would need DOM-level description extraction, which feeds synthesis) and 1
+live page change (serit.no). Also added: `effective_at` = the article's own timestamp on both news
+evidence items, and the posted date on site JSON-LD and NAV posting evidence (platform-linked
+postings carry no date on the page and get none).
 
 ## Next step
 
-W1(b): labelled discovery run (400 companies, frozen v4-dev code) is in progress; then
-`eval/discovery_rescore.py` for the W1(c) detection change (uncommitted in the working tree:
-`identity.py` org-number detectors, `website.py` in-memory `_org_numbers_anywhere`, `domain_solver.py`
-new proof branch).
+W3 candidate c2 (7069108 = W2 + news pagination; W1c is still inside c2 but coverage-neutral) is
+running on proxy-200 and sample-100. Then: decide W3, build the final candidate from HEAD, W5 gates.
