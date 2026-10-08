@@ -219,9 +219,24 @@ Wall time on proxy-200 is set by the NAV index, not by the web pass: in that run
 and NAV finished at 300.4 s (NAV took ~285 s, ~250 s earlier today). To apply the +15% rule fairly, v3
 itself is re-timed today under the same NAV conditions.
 
+## W5: gates (candidate 07d1a92 "fin2"; final 850993e differs only in a stricter page-2 path match)
+
+| Gate | Result |
+|---|---|
+| Unit tests | 149 pass (139 rev4 + 10 new W2/W3 tests) |
+| Schema validator | 0 errors, 200/200 (both proxy-200 runs) |
+| Determinism (proxy-200 run 1 vs run 2, same output file) | 172/200 identical after volatile keys; differences are page bytes (171 hashes, excerpts) plus 6 news items that switched between feed and article citation; **1 company** differs in claim values (980155889, the site served other event titles under the same timestamp); **0 duplicates, 0 change events** |
+| Refresh (run 2 on run 1) | 200 compared, **0 material changes**, 0 failed |
+| precision_audit (100 claims) | **99/100 supported, 0 wrong-company**, 20/20 web spans on the page. The 1: the website claim for 960221001 (kvalitet-sikkerhet.no); the audit wants the URL printed on the page, this homepage only has relative links; right company confirmed |
+| evidence_audit (100 claims, 163 items) | all URLs load, **100.0% spans verbatim** (rev3/rev4: 99.3–99.4%), 70.6% hashes identical on re-fetch (dynamic pages; reported as measured) |
+| Red team (35 high-risk names) | **0 false positives**, 35 safe abstentions (report unchanged) |
+| Coverage vs v4-dev (proxy-200) | website 44 = 44, description 41 = 41, social 21 → 22 (live, Flav), news 23 = 23 companies and 196 → **295 facts (+50.5%)**, hiring 16 = 16 |
+| Coverage vs v4-dev (sample-100) | website 72, description 67, social 40 unchanged; news 34 → **35** companies, 312 → **412** facts (+32%); hiring 20 = 20 |
+| Synthesis / viewer diff vs v4-dev | synthesis text differs for 1/200 (Flav: social links loaded in this run); viewer DATA differs only in live page content and news items of 3–4 companies. No synthesis or viewer code edited |
+| Runtime | proxy-200 wall is NAV-bound: v3 re-timed today **288 s** (NAV done 286.8 s); fin2 327 s (overlapping the red team) and 306 s → +6% to +13.5% vs v3 today. Web pass (code-dependent): v3 84 s, v4-dev 87 s, fin2 101–102 s (tail: slow sites now use their full 60 s budget). Throughput (summed request latency, what a 1,500 run scales with): v3 1,227 s, v4-dev 1,342 s, fin2 1,364 s = **+11% vs v3, +1.6% vs v4-dev**. 1,500-company estimate ≈ 15 + 150 + 916 ≈ 1,080 s (v3 ≈ 990 s), under the 1,500 s hard deadline |
+| Budget-cut crawls (per-company 60 s web budget) | 1–2 → 4 (proxy-200), 2 → 5 (sample-100); each cut company gained 10 news items and lost nothing; cuts only set `web_claims.crawl_complete=false` (used by refresh to avoid false removals), never an envelope state |
+
 ## Next step
 
-Final candidate = 07d1a92 (W2 + W3 with the fix; W1c reverted). Running: v3 re-timed on proxy-200,
-then the candidate on proxy-200 twice into one output (determinism + refresh) and on sample-100.
-Then: schema validator, precision_audit, evidence_audit, span census, red team, synthesis/viewer diff,
-clean clone.
+Pending: clean clone of 850993e, parity runs of 850993e on proxy-200 and sample-100,
+full span census on the final output. Then the final summary.
