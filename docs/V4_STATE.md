@@ -204,8 +204,24 @@ news and hiring is worth up to 12.5 recall points if read, realistically 5–8):
 3. `profile.evidence.website.value.news` / `.jobs` lists: changes the kit-shaped profile (frozen);
    lowest priority.
 
+## W3 fix found during W5 (07d1a92)
+
+The first final run (59a4178) showed news items moving between sections for one company: on
+strongpoint.com the `/news/` page carries `<link rel="next">` pointing at another language section
+(`/no/nyheter/page/2/`), and the first pagination rule followed any rel=next. Now rel=next must also
+stay under the listing's own path (it picks `/news/page/2/` there). Second, pagination used the same
+20-fetch article budget as the re-read of kept items from their own pages, so on 917790531 4 items
+fell back from their article to a feed citation; the re-read now has its own budget
+(`FETCH_CAPS["news_upgrade"]`). Feed-cited news claims were 25 → 60 of 195 → 294 (proxy-200, c1 → c2):
+honest (company feed, verbatim title and date), but the article page is the better source.
+
+Wall time on proxy-200 is set by the NAV index, not by the web pass: in that run pass 2 ended at 140.7 s
+and NAV finished at 300.4 s (NAV took ~285 s, ~250 s earlier today). To apply the +15% rule fairly, v3
+itself is re-timed today under the same NAV conditions.
+
 ## Next step
 
-Final candidate = 59a4178 (W2 + W3; W1c reverted). W5 gates are running: proxy-200 twice into one
-output (determinism + refresh), sample-100, then schema validator, precision_audit, evidence_audit,
-span census, red team, synthesis/viewer diff, clean clone.
+Final candidate = 07d1a92 (W2 + W3 with the fix; W1c reverted). Running: v3 re-timed on proxy-200,
+then the candidate on proxy-200 twice into one output (determinism + refresh) and on sample-100.
+Then: schema validator, precision_audit, evidence_audit, span census, red team, synthesis/viewer diff,
+clean clone.
