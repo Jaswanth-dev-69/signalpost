@@ -42,31 +42,40 @@ Signalpost revision 4 (version 4 of five; v1 `31cf2983`, v2 `0ded7110`, v3
 
 ## What changed since v3
 
-1. **Verbatim single-node evidence spans.** Every `claim_span` is now a verbatim fragment of one text
-   node or attribute of the page it cites. Three span builders quoted sentences we had composed
-   ourselves (the NAV vacancy-index check, websites held back as `ambiguous`, and checked news
-   listings); on a 200-company benchmark the failing items went from about 546 of 11,200 to **4**,
-   and a live 100-claim audit now re-finds **163 of 163** spans on their pages.
+1. **Verbatim single-node evidence spans.** Every `claim_span` is a verbatim fragment of one text
+   node or attribute of the page it cites; spans we had composed ourselves (the NAV vacancy-index check,
+   websites held back as `ambiguous`, checked news listings) are gone. Annual-accounts spans are now the
+   value as printed (`288000.00`, `2024-12-31`), so they match whether a verifier gets the JSON
+   (`Accept: */*`) or the XML (browser-style `Accept`) that the Regnskapsregisteret API negotiates, and
+   the filing year cites the live Enhetsregisteret record instead of the 150 MB bulk file. Registry and
+   accounts evidence re-found verbatim under a browser-style Accept: 61% → **100%** (9,903 items).
 2. **Effective dates on news and postings.** Each dated-news evidence item carries the article's own
-   published timestamp as `effective_at`, and each job posting carries its posted date where the
-   source states one, alongside the existing reporting periods on financial claims.
+   published timestamp as `effective_at`; each job posting carries its posted date where the source
+   states one, alongside the reporting periods on financial claims.
 3. **News listing pagination.** A news listing that shows fewer items than our per-company cap is
    followed to its own second page (and a WordPress feed to its second page), each item still read
-   from its own article page. Dated-news facts rose about **50%** on our 200-company benchmark and
-   **32%** on the 100 companies in your public product sample, with company coverage unchanged.
-4. **Robustness fixes carried over from our rev4 work.** Careers pages crawled before news so a
-   budget cut costs articles rather than the careers page; careers discovery to depth 2 plus sitemap;
-   `Accept: */*` retry on HTTP 406; one retry for homepage timeouts, 429 and 5xx; 401/403 reported
-   honestly as `blocked`; news cap raised from 10 to 20 items per company.
-5. **No change to synthesis or UX.** Neither the synthesis nor the viewer code was touched; on a
-   200-company before/after diff the summary text changes for one company only, because its social
-   links loaded in that run.
+   from its own article page: dated-news facts **+80%** on our 200-company benchmark and **+63%** on the
+   100 companies of your public product sample, with company coverage unchanged.
+4. **The same news and hiring facts in your observation format.** Besides one `dated_news` /
+   `hiring_signal` claim per fact, each envelope now carries `external.observations` — one record per
+   news item (`signal_type: public_post`) and per careers page or posting (`job_posting`) in the
+   starter kit's `external_footprint` schema (all pass its `validate_observation`) — and
+   `external.company_site.{posts,jobs}` in the layout of your sample's `external.linkedin` block. These
+   are the same identity-gated facts with the same evidence, not additional ones; please read whichever
+   shape your scorer uses.
+5. **Robustness and refresh correctness.** Careers pages crawled before news, careers discovery to
+   depth 2 plus sitemap, `Accept: */*` retry on HTTP 406, one retry for homepage timeouts/429/5xx,
+   401/403 reported as `blocked`, news cap 10 → 20. A website discovery that stopped on a transient
+   error is now marked incomplete, so a later run never reports that site's facts as new or removed
+   (this removed the only false changes we saw when running the same batch twice).
+6. **No change to synthesis or UX.** Neither the synthesis nor the viewer code was touched (a guard
+   script checks every commit); on 200 companies the summary text is identical to v3.
 
-Checks on the submitted commit: 149 unit tests pass; schema validator 0 errors; the same batch run
-twice gives 0 duplicate records and 0 false changes, and the refresh pass reports 0 material changes;
-a 100-claim precision audit is 99/100 supported with **0 wrong-company publications** (the one
-exception is an audit heuristic — the homepage does not print its own URL — and the company match is
-confirmed); a 35-company wrong-company red team is 0 false positives; evidence-span validity 100%.
+Checks on the submitted commit: unit tests pass; schema validator 0 errors; the same batch run twice
+gives 0 duplicate records and 0 change events; a 100-claim precision audit is 99/100 supported with
+**0 wrong-company publications** (the exception is an audit heuristic: the homepage does not print its
+own URL; the company match is confirmed); evidence spans 100% verbatim on re-fetch; a 35-company
+wrong-company red team 0 false positives; a 1,500-company run projects to about 1,020–1,160 s.
 
 ## Open questions
 
@@ -106,8 +115,8 @@ Jaswanth
 
 ## Not in the email (kept for the packaging step)
 
-- `<HASH>`: the v4 commit, currently `850993e` on `v4-dev` plus docs-only commits on top. The hash
-  sent must be the one on the default branch at submission time.
+- `<HASH>`: the commit on `main` that contains the v4 smoke test (`docs/smoke-test/README.md` names
+  the code commit it was run from; later commits differ from it only in `docs/`).
 - `<CONTACT EMAIL>`: filled in when sending; deliberately not committed to this public repository.
 - Questions 7–17 in `docs/QUESTIONS_FOR_BUILDERR.md` are not in this email. The most valuable
   omissions are Q7 (which evidence checks cost the missing points), Q15 (the accounts API answers XML

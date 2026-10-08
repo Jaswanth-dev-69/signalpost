@@ -1,7 +1,7 @@
 {
-  "run_id": "smoke-rev3",
-  "started_at": "2026-10-05T17:27:10.671581Z",
-  "completed_at": "2026-10-05T17:34:58.648644Z",
+  "run_id": "smoke-v4",
+  "started_at": "2026-10-08T19:41:51.773987Z",
+  "completed_at": "2026-10-08T19:46:17.131550Z",
   "expected_count": 100,
   "emitted_envelopes": 100,
   "modules": [
@@ -15,30 +15,37 @@
     "website"
   ],
   "registry": {
-    "registry_snapshot_sha256": "0b502cd50b8c99a408ea3cd2aa1bfc393c8affae8d0dd85889b97036c5884946",
-    "registry_rows_scanned": 1172017,
+    "registry_snapshot_sha256": "ec76476654c2e21a78d6434b32e30fb139d0360f1694fbc2d4fd75bf88b9eeba",
+    "registry_rows_scanned": 1172026,
     "requested": 100,
     "selected": 100
   },
   "operations": {
-    "requests": 800,
-    "bytes": 36010208,
+    "requests": 844,
+    "bytes": 37952416,
+    "declared_domain_counts": {
+      "status": "ok",
+      "error": null,
+      "domains": 84688,
+      "seconds": 10.3,
+      "effect": null
+    },
     "nav_job_index": {
-      "active_ads": 12856,
-      "entries_fetched": 9705,
-      "closed_ads": 3151,
+      "active_ads": 13692,
+      "entries_fetched": 10223,
+      "closed_ads": 3469,
       "errors": 0,
       "http_429": 0,
       "complete": true,
-      "employers_indexed": 6040,
+      "employers_indexed": 6371,
       "failed": null,
       "companies_with_postings": 0
     },
-    "p50_ms": 317,
-    "p95_ms": 2251,
+    "p50_ms": 301,
+    "p95_ms": 1895,
     "http_429_registry": 0,
     "http_429_web": 0,
-    "wall_time_s": 468.2
+    "wall_time_s": 265.6
   },
   "validation": {
     "passed": true,
@@ -51,10 +58,18 @@
     }
   },
   "refresh": {
-    "previous_envelopes": 0,
+    "baseline": {
+      "path": "/home/altf4/Desktop/SIGNALPOST/signalpost/signalpost-starter-kit/signalpost-starter-kit/.work/pkg/out/smoke-envelopes.jsonl",
+      "rows": 0,
+      "usable": 0,
+      "bad_lines": 0,
+      "without_profile": 0,
+      "error": null
+    },
     "compared": 0,
     "material_changes": 0,
-    "companies_changed": 0
+    "companies_changed": 0,
+    "failed": 0
   },
   "errors": []
 }

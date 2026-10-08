@@ -435,7 +435,45 @@ Discoveries flagged incomplete: 11 of 200 (proxy-200, the same in both runs) and
 one discovered site per 100–200 companies per run); a cheap retry of fast failures only (reset,
 429/5xx, not timeouts) is the next thing to size.
 
+## Session 3 summary
+
+`origin/main` carries v4 (code `ba77e4d`; the smoke-test commit on top changes only `docs/`). Tags:
+`v3-submitted` = 6074351, `v2-submitted` = 0ded711. `v4-dev` and `rev4-candidate` untouched.
+
+| Workstream | proxy-200 before → after | sample-100 before → after | Noise floor | Wrong-company | Runtime (summed latency vs v3; 1,500 projection) | Verdict |
+|---|---|---|---|---|---|---|
+| v4 on main (rev4 + W2 + W3) | news 164 → 295 facts (23 → 23 cos), hiring 15 → 16 cos | news 253 → 412 facts, hiring 18 → 20 cos | 0 (main run 1 = run 2) | 0 | +5.2% / +20.7%; 1,033–1,161 s | pushed |
+| P1 read-path hedge | 0 claims changed (300/300 rebuilt); +293 observations | +434 observations | — | 0 | +0.8% / +2.4% (noise) | **kept**: hedge-only reader 20.52 → 41.96 (mirror) |
+| P2 registry/accounts evidence | verbatim under browser Accept 61.0% → 100.0%; bulk-CSV items 200 → 0 | 101 → 1 | — | 0 | 0 requests | **kept** |
+| P2c claim audit | v3: 167 missing effective dates → 0 issues | 0 issues | — | 0 | — | clean |
+| P3 news cap 30 / embedded JSON / postings | sized: 10 cos at cap; 0 of 21 with embedded JSON; 0–1 postings | 14 cos at cap | — | — | +4–6% requests for the cap | rejected (cost rule; 0) |
+| P4 TLS / bare domain | 1 TLS case, unrecoverable | 0 | — | — | — | rejected (0) |
+| P4 refresh correctness | determinism pair 27 false changes (c1) → 0 (c3); coverage equal | −1 company (flaky discovery, flagged) | ±1 company per run | 0 | +3.8% / +21.0% | **kept** (c3); retry variant c2 dropped |
+| P5 discovery | — | — | — | — | — | nothing new to try |
+
+Gates on the final code (proxy-200): 159 unit tests, frozen guard clean (also vs `v3-submitted`),
+schema 0 errors, claim audit 0 issues, determinism pair 0 duplicates / 0 change events, refresh 0
+material, precision_audit 99/100 and 0 wrong-company, evidence_audit 100% verbatim, red team 0/35,
+synthesis text identical to main for 200/200, viewer DATA differs only in live page content. Cold-cache
+fresh clone of `24fa82f` from GitHub: `uv sync` 2 s (cache 0 → 82 MB), run exit 0 in 267 s, 100/100
+envelopes, schema 0 errors; `docs/smoke-test/` regenerated from it.
+
+Estimates (mirror, sample-100, λ = 1.18): case A (website and social read from the kit profile)
+**Recall ≈ 17.4** for v3 and v4 alike (15–19); case B (news and hiring claims, or now the hedge,
+read) **≈ 35.6** for v4 vs 33.7 for v3 (realistic 26–34 once other entrants' news/careers enlarge the
+union). Evidence 26–29 (v4 removes every non-verifiable span we found; how deductions work is Q7).
+
 ## Next step
+
+1. Email the commit that adds the v4 smoke test (the hash is in the session's final report) with
+   `docs/V4_EMAIL.md`; fill `<HASH>` and `<CONTACT EMAIL>` when sending. That uses revision 4 of 5.
+2. When Builderr's feedback on v3 or v4 arrives, map its per-family percentages to case A/B. If news or
+   hiring is still 0.0% with v4's hedge in place, the read path is something else: ask (Q2/Q3/Q17)
+   before spending v5.
+3. Next measurable lever: a retry of fast transient failures only (reset, 429/5xx, not timeouts) in
+   discovery, sized on proxy-200 pairs; it would cut the one-site-per-run coverage noise without the
+   timeout cost that sank c2.
+## Earlier next step (session 2, superseded)
 
 1. When the v3 feedback arrives: map its per-family percentages to case A/B in the Summary. If news
    or hiring is still 0.0%, implement W4 hedge 1 (kit observation records) on `v4-dev` with the same
