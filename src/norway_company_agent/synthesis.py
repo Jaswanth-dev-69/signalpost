@@ -273,7 +273,7 @@ class _Sources:
 
 
 NACE_DIVISIONS = {
-    "01": "crop and animal production, hunting and related services", "02": "forestry and logging", "03": "fishing and aquaculture",
+    "01": "crop and animal production, hunting and related services", "02": "forestry and logging", "03": "fishing/aquaculture",
     "05": "mining of coal and lignite", "06": "extraction of crude petroleum and natural gas", "07": "mining of metal ores",
     "08": "other mining and quarrying", "09": "mining support services", "10": "manufacture of food products",
     "11": "manufacture of beverages", "12": "manufacture of tobacco products", "13": "manufacture of textiles",
@@ -330,6 +330,30 @@ JUNK_TITLE = re.compile(r"lorem ipsum|^test\b|testpost|^alle (børs|presse|nyhet
 HOLDING_TEXT = re.compile(r"investering|eie (og forvalte )?aksjer|eierskap|aksjer og andeler|aksjer, andeler|kjøp og salg av aksjer|"
                           r"(deltakelse|delta|deltagelse) i andre (selskap|virksomhet|foretak)|holding", re.I)
 PROPERTY_TEXT = re.compile(r"(utleie|kjøp og salg|forvaltning|drift|utvikling|eie) av (egen |fast )?(fast )?eiendom|eiendomsdrift|eiendomsutvikling|utleie av bolig", re.I)
+# English for common terms in Norwegian activity texts (a reader aid: the original text is quoted next to it).
+ACTIVITY_TERMS = (
+    (r"barnehage", "kindergarten"), (r"tannleg|tannhelse|tannklinikk", "dental care"), (r"legesenter|legekontor|legetjenest|medisinsk", "medical services"),
+    (r"fysioterapi", "physiotherapy"), (r"psykolog", "psychology"), (r"frisør", "hairdressing"), (r"hudpleie|skjønnhet|kosmetisk", "beauty care"),
+    (r"restaurant|servering|kafé|kafe\b|catering|take-?out", "restaurants/catering"), (r"hotell|overnatting|utleie av hytte", "accommodation"),
+    (r"borettslag|boligsameie", "housing cooperative"), (r"eiendom", "real estate"), (r"oppføring av|bygg(e|virksomhet|arbeid)|entrepren", "construction"),
+    (r"tømrer|snekker", "carpentry"), (r"maler|malearbeid", "painting"), (r"rørlegg|vvs", "plumbing"), (r"elektronikk", "electronics"), (r"elektriker|elektroinstallasjon|elektrisk installasjon|elektroentrepren", "electrical installation"),
+    (r"grunnarbeid|graving|anleggsarbeid|maskinentrepren", "groundworks"), (r"taxi|drosje", "taxi services"),
+    (r"transport|frakt|budtjenest|logistikk|spedisjon", "transport/logistics"), (r"regnskap|bokføring", "accounting"), (r"revisjon", "auditing"),
+    (r"konsulent|rådgivning", "consulting"), (r"programvare|software|datasystem|systemutvikling|\bit[- ]|informasjonsteknologi", "software/IT"),
+    (r"detaljhandel|butikk|nettbutikk|netthandel", "retail"), (r"\bhandel\b|handelsvirksomhet", "trade"), (r"engros|agentur", "wholesale"), (r"import|eksport", "import/export"),
+    (r"tilvirkning|fabrikasjon|fabrikk|industri", "manufacturing"), (r"produksjon", "production"), (r"landbruk|jordbruk|gårdsdrift|husdyr", "agriculture"),
+    (r"skogbruk|skogsdrift|tømmer", "forestry"), (r"fiske|havbruk|oppdrett", "fishing/aquaculture"), (r"reklame|markedsføring", "marketing"),
+    (r"undervisning|opplæring|kurs\b|skole", "education/training"), (r"trening|treningssenter|idrett", "sports/fitness"),
+    (r"reiseliv|reisebyrå|turisme|opplevelse", "tourism"), (r"forsikring", "insurance"), (r"utlån|kreditt|finansier", "finance"),
+    (r"renhold|vask\b|rengjøring", "cleaning"), (r"vakthold|sikkerhet", "security services"), (r"bilverksted|bilsalg|kjøretøy|\bbil(er)?\b", "motor vehicles"),
+    (r"båt", "boats"), (r"reparasjon|verksted|vedlikehold", "repair/maintenance"), (r"rederi|skipsfart|maritim", "shipping"),
+    (r"petroleum|olje|naturgass", "oil/gas"), (r"energi|kraftproduksjon|strøm", "energy"), (r"arkitekt", "architecture"),
+    (r"ingeniør", "engineering"), (r"advokat|juridisk", "legal services"), (r"helse|omsorg|pleie", "health/care"),
+    (r"design", "design"), (r"foto", "photography"), (r"musikk|konsert", "music"), (r"film|tv-produksjon", "film/TV"),
+    (r"forlag|utgivelse", "publishing"), (r"utleie av (maskiner|utstyr)", "equipment rental"),
+    (r"matvare|næringsmiddel|\bmat\b", "food"), (r"dagligvare", "groceries"), (r"klær|tekstil", "clothing/textiles"),
+    (r"møbler|interiør", "furniture/interiors"), (r"\bdyr\b|veterinær", "animals/veterinary"),
+)
 HOUSING_FORMS = {"BRL", "ESEK", "SAM"}
 OWNED_FORMS = {"AS", "ASA"}
 READABLE_ENTITY = "https://virksomhet.brreg.no/nb/oppslag/enheter/{org}"
@@ -529,10 +553,15 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     activity = str(value("registered_activity") or "")
     description = str(value("company_description") or "")
     activity_gloss = None
-    if HOLDING_TEXT.search(activity):
-        activity_gloss = "refers to investing in or owning shares in other companies"
-    elif PROPERTY_TEXT.search(activity):
-        activity_gloss = "refers to owning, letting or managing real estate"
+    found: list[tuple[int, str]] = []
+    for pattern, english in (*ACTIVITY_TERMS, (HOLDING_TEXT.pattern, "owning shares in other companies"),
+                             (PROPERTY_TEXT.pattern, "real estate")):
+        match = re.search(pattern, activity, re.I)
+        if match and english not in [e for _, e in found]:
+            found.append((match.start(), english))
+    terms = [e for _, e in sorted(found)][:3]
+    if terms:
+        activity_gloss = f"mentions {_join(terms)}"
     material: list[tuple[str, Any]] = []  # the most material dated changes, for the opening
 
     # 1. Company ----------------------------------------------------------------------------------
@@ -564,7 +593,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         gloss = f" (broad NACE division {division}: {division_text})" if division_text else ""
         does.append((f"Its registered industry is {code + ' ' if code else ''}{_quote(label, 160)}{gloss}", industry_claims))
     if activity:
-        does.append((f"Its registered business activity reads, in Norwegian, {_quote(activity)}" + (f"; this text {activity_gloss}" if activity_gloss else ""),
+        does.append((f"Its registered business activity reads, in Norwegian, {_quote(activity)}" + (f"; in English, this text {activity_gloss}" if activity_gloss else ""),
                      available("registered_activity")))
     if description:
         does.append((f"Its verified website describes it as {_quote(description)}", available("company_description")))

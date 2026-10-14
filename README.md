@@ -70,27 +70,34 @@ all run the same agent and write the same envelopes. Outputs next to `--output`:
 
 ### Reading the results: summary and viewer
 
-Each envelope starts with a `summary` (also the first claim, `summary_profile`): what the company
-is and does (register industry and activity text, the verified website's own description), its size
-and latest filed accounts, **what changed** (movements between the reported years in the accounts
-register, the latest role updates in the register, former names, the newest dated item on its
-website, and the result of the refresh against the previous run), leadership and locations, web
-presence, hiring, dated activity, and **what is not known**. Every sentence is assembled from the
-envelope's own published claims; numbered markers such as `[3]` point at the `sources` list, and
-each source lists the evidence ids it stands for. `eval/synthesis_validator.py` checks that every
+Each envelope starts with a `summary` (also the first claim, `summary_profile`). It opens with **In
+brief** (what the company is, its latest figures, its most material recent change and its web
+presence), then: what it does (register industry with its broad NACE division in English, the
+registered activity text, the verified website's own description), size and finances, **what changed**
+(movements between twelve-month accounting periods, role changes ranked chief executive > board >
+others, name changes, the newest dated item on its website, the comparison with the previous run),
+leadership and locations, web presence, hiring, dated activity, and **what is not known**.
+Parent-only accounts, part-year periods and negative equity are labelled. Every sentence is assembled
+from the envelope's own published claims; numbered markers such as `[3]` point at the `sources` list,
+and each source lists the evidence ids it stands for. `eval/synthesis_validator.py` checks that every
 date, amount, URL, quote and name in a summary matches a published claim.
 
-Open `<output>.viewer.html` in any browser (desktop or phone; it works offline):
+Open `<output>.viewer.html` in any browser (desktop or phone; it works offline).
+`docs/smoke-test/smoke-viewer.html` is the viewer of the 100-company smoke test.
 
-- **Find**: search by name, organisation number, municipality, industry, registered activity or a
-  role holder's name; the tiles at the top and the filters narrow the list; sort by revenue,
-  revenue growth, employees or latest news.
+- **Find**: search by name, organisation number, municipality, industry (Norwegian or English),
+  registered activity or a role holder's name; tiles and filters (legal form, industry, municipality,
+  accounts, website, social, news, hiring, changed in the last 90 days, register status); sort by
+  revenue, revenue growth, employees or latest news; saved searches.
 - **Compare**: tick up to four companies (or press *Add to compare* on a profile) and press
-  *Compare*: one table with the register facts, three-year figures, leadership, website, social
-  profiles, news and hiring, each with its source; download it as CSV or copy a link.
-- **Verify**: every summary sentence links to its sources, every value links to the page it was
-  read from, and *Evidence* lists every published claim with the quoted span, fetch time and the
-  SHA-256 of the fetched content. `#org=<organisation number>` links straight to a profile.
+  *Compare*: one table (cards on a phone) with the register facts, three years of revenue, results,
+  equity, group accounts, leadership, website, social profiles, news, hiring and recent changes;
+  download it as CSV or copy a link.
+- **Verify**: each profile opens with the brief and key metrics (with source links), then the full
+  summary with numbered sources, a dated timeline of changes, and *Evidence*: every published claim
+  with the quoted span, the source page, fetch time and (on request) the SHA-256 of the fetched
+  content. Register facts also link to the readable Brønnøysund page. `#org=<organisation number>`
+  links straight to a profile.
 
 The published archive was clean-room verified on August 24, 2026: 104 tests and 5 subtests passed, followed by a one-company live BRREG smoke run with one terminal envelope, five requests and zero silent drops.
 

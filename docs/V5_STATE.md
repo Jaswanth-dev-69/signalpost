@@ -276,16 +276,23 @@ traceable; claim audit 0; headless checks pass.
 | Forced hard deadline (proxy-200, 75 s) | exit 0 at 76 s, 200/200 envelopes, schema 0, summaries and viewer written |
 | 1,500 projection (summed request latency, scaled from v3's measured 990 s) | 1,134–1,193 s; the real 1,200 run scales to about 700 s |
 
-## Status at cut-off (14 Oct ~20:00 IST)
+## Packaging (15 Oct ~00:20 IST)
 
-- **Pushed:** WS-A at `e8f86b1` (origin/main, fast-forward from `pre-v5`), full push gate above.
-- **Not pushed:** WS-B code in the working tree (also saved as `.work/patches/wsb-v5c.patch` and
-  `.work/patches/test_v5b.py`): H1 org number, H2 kit-profile listing pages, H3 article citations,
-  H4 news paths, H5 titles (slug-matched, section pages dropped, repeated titles dropped; template
-  posts kept as claims), H6 tracking parameters stripped, plus the article-`<h1>`-inside-teaser
-  title. 184 unit tests pass. The last two refinements and H6 have **not** had a live run yet.
-- **Next, in order:** (1) summary/viewer fixes from the blind review (filter template posts from the
-  narrative); (2) WS-B live runs on the three sets + determinism pair + push gate, then push;
-  (3) WS-C forced-deadline test (`--hard-deadline 70` on proxy-200: 200 envelopes, schema 0,
-  summaries, viewer written); (4) cold-cache clone of the final hash, regenerate `docs/smoke-test/`
-  for v5 (include the smoke viewer), email draft with placeholders; never send.
+- Agent code of v5: `8dad2bb6cdd1bd04df8a66720bbc253341675fda` (pushed; full gate above, guard-clean S/U changes on top of the
+  gated `a23df29`).
+- Cold-cache fresh clone of `8dad2bb` from GitHub into an empty directory with an empty `UV_CACHE_DIR`
+  and no virtualenv: `uv sync` exit 0 (2 s, 82 MB cache), the one command on the 100-company smoke list
+  exit 0 in 263 s, 100/100 envelopes, schema validator 0 errors, summaries 100/100 traceable, claim audit
+  0 issues. `docs/smoke-test/` regenerated from that run (README, envelopes, report, input list and the
+  run's viewer `smoke-viewer.html`).
+- Submission commit: the `main` commit that carries that smoke test (docs only on top of `8dad2bb`).
+  Email draft: `docs/V5_EMAIL.md` (hash and contact as placeholders); a filled copy is kept outside the
+  repository. Nothing has been sent.
+
+## Status (15 Oct 2026, night)
+
+- WS-A (Synthesis and UX), WS-B (news/hiring shape and quality) and three S/U rounds are on `main`
+  with their gates; WS-C measured (real 1,200-company run 553 s, 0.9 GB).
+- Agent code `8dad2bb`; submission commit = the docs commit carrying the cold-clone smoke test.
+- Not done: no evidence that our news/hiring items now match Builderr's verified pool (only their
+  scorer can show it); website and social coverage unchanged by design (identity gate untouched).

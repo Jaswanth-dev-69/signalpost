@@ -243,3 +243,9 @@ class SummaryRules(unittest.TestCase):
         text = envelope_summary(self.env_with(page))["text"]
         self.assertIn("It has a careers page, https://www.example.no/jobb", text)
         self.assertNotIn("lists open positions", text)
+
+    def test_activity_text_is_glossed_in_english(self):
+        env = self.env_with({"field": "registered_activity", "value": "Drift av barnehage og tilhørende virksomhet, herunder deltakelse i andre selskaper."})
+        env["claims"] = [c for c in env["claims"] if c["field"] != "registered_activity" or "barnehage" in str(c.get("value"))]
+        text = envelope_summary(env)["text"]
+        self.assertIn("in English, this text mentions kindergarten and owning shares in other companies", text)
