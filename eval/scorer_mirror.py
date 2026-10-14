@@ -18,6 +18,7 @@ Read modes (how the scorer is assumed to read an envelope):
   hedge    kit, plus news and hiring from external.observations (the kit's observation records).
 
 Usage:
+  python eval/scorer_mirror.py --anchors        (what the official anchors imply)
   python eval/scorer_mirror.py --orgs ORGS.txt --run kit=KIT.jsonl:kit --run v2=V2.jsonl:auto \
       [--sample DATA.json] [--families website,social,news,hiring] [--collection-website any|exact]
 """
@@ -162,7 +163,28 @@ def score(orgs: list[str], run: dict, collection: dict, families: list[str]) -> 
     return {"recall_points": round(recall, 2), "families": per_family}
 
 
+# Official anchors (Recall points) and what they imply under the contract's formula with the four
+# external families weighted equally: Recall = 50 * mean(coverage) = 12.5 * sum(coverage).
+ANCHORS = {
+    "v2 board (5 Oct)": 8.05,          # social read as 0.0% in Builderr's v2 feedback
+    "kit-like entries (board)": 13.07,
+    "C300 estimate (v3 or v4)": 14.34,  # Soham: no dated-news item matched the verified pool
+}
+
+
+def anchor_table() -> None:
+    """What each anchor implies: the summed family coverage, and the per-family coverage if only
+    website and social score (news and hiring 0)."""
+    print(f"{'anchor':28}{'recall':>8}{'sum of coverages':>18}{'web=social if news=hiring=0':>30}")
+    for name, recall in ANCHORS.items():
+        total = recall / 12.5
+        print(f"{name:28}{recall:>8.2f}{total:>18.3f}{100 * total / 2:>29.1f}%")
+
+
 def main() -> int:
+    if "--anchors" in sys.argv:
+        anchor_table()
+        return 0
     parser = argparse.ArgumentParser()
     parser.add_argument("--orgs", required=True)
     parser.add_argument("--run", action="append", required=True, help="name=path.jsonl:mode")

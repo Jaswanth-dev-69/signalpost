@@ -96,3 +96,96 @@ live runs an hour apart the families move by ±2 companies per 300, which is the
 | Unit tests | 157 + 13 new pass |
 | Headless browser, 100 companies | 0 console/page errors, ready 0.24 s, profile < 70 ms, compare/deep link/mobile flow pass |
 | Headless browser, 1,500 companies | 20.6 MB (rich sample replicated), ready 0.61 s desktop / 0.50 s mobile emulation, all checks pass; random population 9.5 KB/company |
+
+## WS-B Recall
+
+### Where the 14.34 comes from (`eval/scorer_mirror.py --anchors`)
+
+With the four external families weighted equally, Recall = 12.5 × (sum of family coverages):
+
+| Anchor | Recall | Sum of coverages | Website = social if news = hiring = 0 |
+|---|---|---|---|
+| v2 board (5 Oct) | 8.05 | 0.644 | 32.2% (v2's social was read as 0.0%, so website ≈ 64%) |
+| kit-like entries (board) | 13.07 | 1.046 | 52.3% |
+| C300 estimate (v3 or v4) | 14.34 | 1.147 | 57.4% |
+
+So the C300 figure is explained by website and social alone at about 57% each, with news and
+hiring scoring 0, which matches Soham's hint. Recall 20 needs the sum to reach 1.6: news or hiring
+must start to match.
+
+### Read path (kit code, our envelopes)
+
+- The kit's company-site news extractor (`scripts/extract_company_site_news.py`) reads news only from
+  the website record's bounded `pages` whose path has a `/news|press|aktuelt|nyheter|artikler|blog/`
+  segment, one observation per company (deepest such page), `platform: company_site`,
+  `signal_type: public_post`. Our profile `pages` held **0 news pages for every company** (0 of 35
+  sample companies with news claims): our news comes from listings, feeds and articles fetched
+  separately. Builderr's v1 feedback example of a dated-news fact was such a page
+  (`https://www.bori.no/aktuelt`); the v2 example was a title + timestamp key.
+- Builderr's own sample keeps posts and jobs under `external.linkedin` (we never label site items
+  as LinkedIn). Our `external.observations` records pass the kit's `validate_observation`.
+- Hiring: the kit has no company-site hiring reader; our careers pages and postings are claims,
+  observations and `company_site.jobs`.
+
+### Hypotheses (sized before coding; expected points are for the unknown read path)
+
+| # | Hypothesis | Sizing (offline or light live sample) | Effort | Verdict |
+|---|---|---|---|---|
+| H1 | Organisation number on every news/hiring claim and `company_site` record ("exact company match") | shape only; all items | XS | build |
+| H2 | News listing pages that produced published items added to the kit profile's `pages` (what the kit's reader sees) | 24/100 sample and 19/200 proxy companies; 14 and 12 on a kit news path | S | build |
+| H3 | Items cited by a feed/listing cite their own article page when it shows the title verbatim (date stays quoted from the feed/listing) | 107/977 items cite a feed (83) or listing (24); 93 articles load and show the title in one node; no extra requests (the upgrade step already fetches them) | S | build |
+| H4 | News path vocabulary: `nyheter.html`, `Aktueltarkiv`, Shopify `/blogs/<blog>`, `/blogger/` | 77 verified-site companies without news: 17 advertise a feed (13 of 14 checked are empty WordPress feeds), about 6 have a missed news section | XS | build |
+| H5 | Title quality: first `<h1>` is often the site logo ("Nordicon" ×20), category pages taken as items ("Nyheter", "Inspirasjon"), template titles ("Hei, verden!") | short titles 72/391, 32/276, 52/310 items; repeated titles 37 items | S | build |
+| H6 | Tracking parameters in item URLs (`?utm_source=rss…`) | 20 items in proxy-200 (one WordPress feed) | XS | build |
+| H7 | Registry sub-unit homepages for companies without one | 4 of 295 companies without a registered homepage have one (live `underenheter`) | S | **rejected** (≤ 0.05 points) |
+| H8 | Individual postings from Norwegian ATS linked from careers pages | already captured (`JOB_PLATFORMS`); 10 companies with site postings, 23 NAV postings in 600 | — | already in |
+| H9 | RSS/Atom autodiscovery | WordPress feeds already tried; checked feeds empty | — | no gain |
+| H10 | Headless rendering of JavaScript news listings | runtime and declared no-browser policy | L | rejected |
+| H11 | News cap 20 → 30 | ruled out earlier (v4) | — | rejected |
+| H12 | Norid registrant lookup as domain proof | forbidden by Norid's terms (earlier finding) | — | rejected |
+| H13 | OSM / Wikidata P2333 / NAV employer homepage / ATS links for company coverage / generator challenger / org-number proof widening | ruled out in earlier sessions | — | rejected |
+| H14 | Website URL normalisation (ports, deep paths) | 1/150 final URLs carries a port, 10 deep paths (kept: they are the verified addresses) | XS | no change |
+| H15 | Social URL normalisation | 1/125 odd form (`facebook.com/pages/...`) | XS | no change |
+| H16 | Per-company web budget spent on 404 careers probes before news upgrades | 4 companies in proxy-200 left 34 items feed-cited because the budget ran out | M | open (runtime trade-off) |
+
+### v5b measurement (WS-B code as of 14 Oct 19:40; live, same day)
+
+| Set | news companies/items v5a → v5b | other families | requests | 1,500 projection |
+|---|---|---|---|---|
+| proxy-200 | 22/276 (det5) → 22/271 | unchanged | +6 | 1,043 s |
+| sample-100 | 35/391 → 32/377 (the 3 lost had only "Hei, verden!", "Hello world!" or blog-category items) | unchanged | +10 | 1,191 s |
+| set-300 | 29/310 → 31/336 (+2 from the new news paths) | hiring 15 → 16 | −6 | 1,141 s |
+
+Org number now on every news/hiring claim and `company_site` record; repeated-title items 37 → 0;
+listing pages in the kit profile for 12/12/17 companies. 34 proxy items stay feed-cited because 4
+slow sites exhausted the per-company web budget before the upgrade fetch (H16).
+
+### Blind review (fresh-context subagent, 40 companies: 20 sample-100 + 20 set-300, labels randomized)
+
+- Summaries: new style won **40/40**; mean overall level **3.98 vs 1.85** (v2 style). Per criterion
+  (new vs v2): does 3.40 vs 2.15, changed 3.92 vs 1.00, unknowns 3.92 vs 1.85, sources 4.90 vs 2.00,
+  no unsupported claims 3.73 vs 3.40, useful 3.88 vs 1.85. None reached level 5.
+- Viewer: new **4** vs v2 **2** overall; find desktop 5 vs 3, find mobile 4 vs 2, compare desktop 5
+  vs 1, compare mobile 3 vs 1, verify desktop 4 vs 2, verify mobile 3 vs 2.
+- Main fixes it asked for (summaries): an "In brief" opening; English glosses (NACE division, role
+  names); "What changed" without junk posts, with recent role changes only (else "no change since
+  …"), partial first periods labelled, no percentages on tiny or equal-rounded amounts; caveats for
+  parent-only accounts, debt above assets, accounts that predate a rename; "the 20 most recent" for
+  capped news; role records broken down by type; human-readable register links. Viewer: readable
+  evidence (no raw dict/JSON values, hashes behind a toggle), mobile compare as stacked cards, wider
+  mobile tables and tap targets, multi-year rows in compare, a short top block, a dated
+  "What changed" timeline and a recent-changes filter.
+
+## Status at cut-off (14 Oct ~20:00 IST)
+
+- **Pushed:** WS-A at `e8f86b1` (origin/main, fast-forward from `pre-v5`), full push gate above.
+- **Not pushed:** WS-B code in the working tree (also saved as `.work/patches/wsb-v5c.patch` and
+  `.work/patches/test_v5b.py`): H1 org number, H2 kit-profile listing pages, H3 article citations,
+  H4 news paths, H5 titles (slug-matched, section pages dropped, repeated titles dropped; template
+  posts kept as claims), H6 tracking parameters stripped, plus the article-`<h1>`-inside-teaser
+  title. 184 unit tests pass. The last two refinements and H6 have **not** had a live run yet.
+- **Next, in order:** (1) summary/viewer fixes from the blind review (filter template posts from the
+  narrative); (2) WS-B live runs on the three sets + determinism pair + push gate, then push;
+  (3) WS-C forced-deadline test (`--hard-deadline 70` on proxy-200: 200 envelopes, schema 0,
+  summaries, viewer written); (4) cold-cache clone of the final hash, regenerate `docs/smoke-test/`
+  for v5 (include the smoke viewer), email draft with placeholders; never send.
