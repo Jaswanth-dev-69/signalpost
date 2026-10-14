@@ -37,6 +37,8 @@ def _render(value: float) -> set[str]:
         out.add(f"{value / 1e6:.1f} million")
     elif size >= 1e4:
         out.add(f"{value / 1e3:,.0f} thousand")
+    elif size >= 1e3:
+        out.add(f"{value / 1e3:.1f} thousand")
     return out
 
 

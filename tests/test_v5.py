@@ -108,11 +108,11 @@ class Summary(unittest.TestCase):
     def test_summary_explains_activity_changes_and_unknowns_with_sources(self):
         text = self.claim["value"]
         self.assertIn("“Utvikling og salg av ladeutstyr for elbiler og tilhørende tjenester.”", text)
-        self.assertIn("Revenue rose 25% from NOK 1.2 million in 2024 to NOK 1.5 million in 2025", text)
-        self.assertIn("previously registered under the name TESTSELSKAP NORD AS (until 2022-11-09)", text)
+        self.assertIn("In its own (parent-company) accounts, revenue rose 25% from NOK 1.2 million in 2024 to NOK 1.5 million in 2025", text)
+        self.assertIn("It was formerly registered as TESTSELSKAP NORD AS (until 2022-11-09)", text)
         self.assertIn("Not known or not established:", text)
-        self.assertIn("first Signalpost snapshot", text)
-        self.assertIn("the register also holds group (konsern) accounts for 2025", text)
+        self.assertNotIn("Signalpost snapshot", text)
+        self.assertIn("The register also holds group (konsern) accounts for 2025", text)
         self.assertTrue(text.startswith("In brief: TESTSELSKAP NORD ASA is a public limited company (ASA)"))
         self.assertRegex(text, r"\[\d+\]")
         for source in self.claim["sources"]:
@@ -138,7 +138,7 @@ class Summary(unittest.TestCase):
         env = envelope(profile())
         env["refresh"] = {"previous_run_id": "run-1", "previous_completed_at": "2026-10-13T06:00:00Z", "material_changes": 0}
         env["changes"] = []
-        self.assertIn("No material change was found compared with the previous run on 2026-10-13", envelope_summary(env)["text"])
+        self.assertIn("No material change was found compared with the previous check on 2026-10-13", envelope_summary(env)["text"])
 
     def test_refresh_changes_are_named_with_examples(self):
         env = envelope(profile())
@@ -193,3 +193,53 @@ class RegressionGuard(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SummaryRules(unittest.TestCase):
+    """Round-2 review rules: ranked role changes, first registrations, comparable periods, junk posts."""
+
+    def env_with(self, *claims: dict) -> dict:
+        env = envelope(profile())
+        ev = env["claims"][0]["evidence_ids"]
+        for claim in claims:
+            env["claims"].append({"availability": "available", "evidence_ids": ev, **claim})
+        return env
+
+    def role(self, name: str, code: str, group: str, stamp: str) -> dict:
+        groups = {"DAGL": ("DAGL", "Daglig leder"), "LEDE": ("STYR", "Styre"), "REGN": ("REGN", "Regnskapsfører")}
+        return {"name": name, "role_code": code, "role": {"DAGL": "Daglig leder", "LEDE": "Styrets leder", "REGN": "Regnskapsfører"}[code],
+                "group_code": groups[code][0], "group": groups[code][1], "last_changed": stamp, "inactive": False}
+
+    def test_a_new_chief_executive_outranks_a_newer_accountant_change(self):
+        roles = [self.role("Kari Nordmann", "DAGL", "DAGL", "2025-06-01"), self.role("Regnskap AS", "REGN", "REGN", "2026-09-01"),
+                 self.role("Ola Nordmann", "LEDE", "STYR", "2026-08-01")]
+        text = envelope_summary(self.env_with({"field": "registered_roles", "value": roles}))["text"]
+        changes = next(line for line in text.split("\n") if line.startswith("What changed"))
+        self.assertIn("changes to the chief executive (daglig leder) on 2025-06-01 (now Kari Nordmann) and the board (styre) on 2026-08-01", changes)
+        self.assertNotIn("Regnskap AS", changes)
+
+    def test_roles_set_at_registration_are_not_changes(self):
+        env = self.env_with({"field": "founded_date", "value": "2012-11-19"},
+                            {"field": "registered_roles", "value": [self.role("Kari Nordmann", "DAGL", "DAGL", "2012-12-01")]})
+        self.assertIn("The registered roles have not changed since the company was registered in 2012", envelope_summary(env)["text"])
+
+    def test_part_year_periods_are_not_compared(self):
+        env = envelope(profile())
+        for claim in env["claims"]:
+            if claim["field"] == "financial_history" and claim["reporting_period"]["tilDato"] == "2024-12-31":
+                claim["value"]["period"] = {"fraDato": "2024-11-02", "tilDato": "2024-12-31"}
+        text = envelope_summary(env)["text"]
+        self.assertIn("do not both cover twelve months (the 2-month period 2024-11-02 to 2024-12-31 and 2025)", text)
+        self.assertNotIn("rose 25%", text)
+
+    def test_template_posts_stay_claims_but_not_news(self):
+        post = {"field": "dated_news", "value": "Hello world! (2021-07-28)", "title": "Hello world!", "published_at": "2021-07-28", "url": "https://www.example.no/hello-world"}
+        text = envelope_summary(self.env_with(post))["text"]
+        self.assertNotIn("The latest dated item on its website is “Hello world!”", text)
+        self.assertIn("They are website template or test posts, not news", text)
+
+    def test_careers_page_is_not_said_to_list_openings(self):
+        page = {"field": "hiring_signal", "value": "https://www.example.no/jobb", "kind": "careers_page", "openings_listed": True}
+        text = envelope_summary(self.env_with(page))["text"]
+        self.assertIn("It has a careers page, https://www.example.no/jobb", text)
+        self.assertNotIn("lists open positions", text)

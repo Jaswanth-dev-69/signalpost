@@ -230,6 +230,52 @@ whose only item was a "Hello world!" feed post: a two-word title on an undated a
 like a section page, which errs toward precision); set-300 news 29/310 → 31/339 (two companies from the
 new news paths), hiring 15/41 → 16/42. Other families unchanged.
 
+### Blind review round 2 (fresh reviewer, absolute grading, 20 companies from `v5c`)
+
+- ~150 facts in 10 summaries spot-checked against the embedded claims: all correct.
+- Summaries mean level **3.80/5**: does 3.30, changed 3.80, unknowns 3.70, sources 4.10, no
+  unsupported claims 4.00, useful 3.75. Viewer **4/5** overall (find 4/4, compare 4/4, verify 4/3).
+- What kept summaries below 5: process jargon ("first Signalpost snapshot", "the agent reads at most
+  20"), product boilerplate as unknowns (reputation; hiring for housing co-ops), Norwegian-only
+  activity text, misleading division glosses (housing co-ops under division 97), role updates
+  ranked by date (an accountant change outranking a new CEO; first registrations shown as changes),
+  old renames under "What changed", percentages on small bases and non-comparable (part-year,
+  17-month) periods, parent-only figures headlined, junk "news" (Lorem Ipsum, test posts, archive
+  pages, page-stamped dates), and "careers page lists open positions" (the flag only means the page
+  did not say there are none: an overclaim, now fixed).
+
+### S/U round 3 (after review round 2)
+
+Summary: process jargon and boilerplate removed; unknowns specific and cited (the check that was
+made), hiring unknown only where relevant, ownership and group composition named as unknown;
+holding/investment and real-estate activity texts glossed in English ("this text refers to …");
+broad NACE gloss suppressed for housing co-ops; role changes ranked chief executive > board >
+others, first registrations (within 120 days of founding) not reported as changes; renames older
+than two years moved to the Company line; only 11–13-month periods compared, others labelled "the
+N-month period …" with "result for the period"; no percentage on small bases (results under 2% of
+revenue) or beyond 10×, a multiple between 2× and 10×; exact "NOK 0 in both"; a note when the
+annual result differs from the operating result by net financial items and tax; parent-only figures
+labelled everywhere; junk and page-stamped news kept as claims but never presented as news; the
+most material change (recent rename, CEO or board change, negative equity) in "In brief".
+
+Viewer: junk news excluded from counts, badges and the news sort; "parent accounts" badge; change
+column only between twelve-month periods (multiples above 2×, debt neutral, correct signs);
+English industry in search plus industry and municipality filters; source links on the brief cards
+and more compare cells; plain-language accounting states; de-duplicated former names; a floating
+Compare button and larger tap targets on phones; honest header/help/compare wording.
+
+Checks: 190 unit tests; regression guard vs `a23df29` clean on 600 live profiles; 600/600 summaries
+traceable; claim audit 0; headless checks pass.
+
+## WS-C Scale
+
+| Run | Result |
+|---|---|
+| Real 1,200-company run (`proxy-1200`, code `a23df29`) | exit 0, **553 s wall** (pass 1 67 s, web pass ends 544 s), 1,200/1,200 envelopes, viewer 13.2 MB, **peak RSS 0.91 GB** |
+| Full 300-company run | 289 s, peak RSS 0.70 GB |
+| Forced hard deadline (proxy-200, 75 s) | exit 0 at 76 s, 200/200 envelopes, schema 0, summaries and viewer written |
+| 1,500 projection (summed request latency, scaled from v3's measured 990 s) | 1,134–1,193 s; the real 1,200 run scales to about 700 s |
+
 ## Status at cut-off (14 Oct ~20:00 IST)
 
 - **Pushed:** WS-A at `e8f86b1` (origin/main, fast-forward from `pre-v5`), full push gate above.
