@@ -176,6 +176,60 @@ slow sites exhausted the per-company web budget before the upgrade fetch (H16).
   mobile tables and tap targets, multi-year rows in compare, a short top block, a dated
   "What changed" timeline and a recent-changes filter.
 
+### S/U round 2 (after the blind review; commit `a23df29`, WS-B under it at `6aed2a2`)
+
+Summary (`synthesis.py`):
+- Opens with **In brief**: legal form, place, NACE division in English, register headcount; latest
+  revenue with the change on the previous full year and the annual result; website, social
+  profiles, hiring and dated news in one line.
+- English glosses: NACE division title after the Norwegian industry label; role and role-group
+  names in English with the Norwegian name in brackets; registered activity marked "in Norwegian".
+- What changed: role updates only if within two years of the run (otherwise "no role in the
+  register was updated in the last two years; the latest update was to … on …"); part-year periods
+  labelled and not compared; no percentage when either amount is under NOK 50 thousand or both
+  round to the same figure; caveats for debt above total assets (negative equity), latest accounts
+  that predate a name change, and parent-only figures when the register also holds group accounts;
+  former names identical to the current one skipped; template posts ("Hello world!") kept as claims
+  but never presented as news.
+- Leadership as roles by type, single holders named ("chief executive (daglig leder) …; 7 board
+  members (styremedlem); auditor (revisor) …"); partners named; correct plurals.
+- Honest artefacts: "the 20 most recent dated news items (the agent reads at most 20)"; social
+  profiles described as "profile pages only; links to single posts or videos are not listed";
+  hiring unknown worded for companies without a website; readable register page linked after the
+  sources (`https://virksomhet.brreg.no/nb/oppslag/enheter/<org>`).
+- New claim `group_accounts` (periods of the register's KONSERN accounts in the response already
+  fetched; span the literal `KONSERN`, verbatim in both the JSON and the XML representation).
+
+Viewer (`viewer.py`): an "In brief" block with six key metrics and a revenue-trend bar chart at the
+top of each profile; register page link; NACE division in English; roles in English; dated
+"What changed" timeline (accounts periods, role updates, name changes, news, refresh changes) with
+the last 90 days highlighted; a "changed in the last 90 days" tile, filter and list badge;
+readable evidence values (no raw dict/JSON), hashes behind a toggle; compare with earlier revenue
+years, equity, group accounts, recent changes and the best value marked; on phones compare is shown
+as one card per metric, financial tables use compact numbers and citation links are larger.
+
+### Push gate for WS-B + S/U round 2 (code `a23df29`; live runs `v5c` of 14 Oct ~23:30 IST)
+
+| Check | Result |
+|---|---|
+| Unit tests | 185 pass at `a23df29`; 184 at `6aed2a2` (WS-B alone) |
+| Schema / claim audit / summary traceability | 0 errors / 0 issues / 100%, 200 and 300 of 100, 200, 300 |
+| Regression guard, S/U commit vs WS-B commit, live profiles | clean on 600 companies; only allowed additions (`group_accounts` 3, 10 and 1 companies) |
+| precision_audit (100 claims, proxy-200) | **100/100 supported, 0 wrong-company**, 16/16 web spans on the page |
+| evidence_audit (100 claims, 165 items) | **100% spans verbatim** |
+| Census of external evidence (proxy-200, 1,844 items, live re-fetch) | 99.9% one-node; the 2 misses are company descriptions (as in v4); every news title/date span passes, including article-page titles with feed/listing dates |
+| Red team | 0/35 false positives |
+| Determinism pair (proxy-200 twice) | 0 duplicates, 0 change events, refresh 200 compared / 0 material; non-summary claims identical for 199/200 (980155889's site serves other event titles under the same timestamps, as in v4) |
+| Forced hard deadline (`--hard-deadline 75`, proxy-200) | exit 0 at 76 s; 200/200 envelopes, schema 0, 200/200 summaries traceable and first, viewer written; 47 websites `budget_exhausted`; peak RSS 515 MB |
+| Viewer, headless Chrome | 0 errors; all find/compare/verify/mobile checks pass; compare 26 rows |
+| Runtime, 1,500 projection | 1,136 s (proxy-200), 1,193 s (sample-100), 1,134 s (set-300) |
+
+Coverage (companies/facts) v5a → v5c: proxy-200 news 21/256 → 22/271; sample-100 website 71 → 70
+(noise), news 35/391 → 33/376 (removed: one company whose only items were blog-category pages, one
+whose only item was a "Hello world!" feed post: a two-word title on an undated article page is treated
+like a section page, which errs toward precision); set-300 news 29/310 → 31/339 (two companies from the
+new news paths), hiring 15/41 → 16/42. Other families unchanged.
+
 ## Status at cut-off (14 Oct ~20:00 IST)
 
 - **Pushed:** WS-A at `e8f86b1` (origin/main, fast-forward from `pre-v5`), full push gate above.
