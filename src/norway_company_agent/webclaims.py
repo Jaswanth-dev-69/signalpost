@@ -12,6 +12,7 @@ import re
 import threading
 import time
 import urllib.error
+import unicodedata
 import urllib.parse
 import urllib.request
 import urllib.robotparser
@@ -35,9 +36,11 @@ PER_HOST_INTERVAL_S = 0.35
 
 NEWS_SEGMENTS = {
     "aktuelt", "nyheter", "nyhet", "nyheiter", "news", "blogg", "blog", "presse", "pressemeldinger",
-    "siste-nytt", "artikler", "artikkel", "aktuelt-og-nyheter", "nyhetsarkiv", "innsikt",
+    "siste-nytt", "artikler", "artikkel", "aktuelt-og-nyheter", "nyhetsarkiv", "innsikt", "aktueltarkiv", "blogger",
 }
 NEWS_PROBE_PATHS = ("/aktuelt", "/nyheter", "/news", "/blogg", "/presse", "/en/news")
+PLACEHOLDER_TITLES = {"hello world!", "hello world", "hei, verden!", "hei verden!", "hei, verden", "blog title", "post title",
+                      "sample page", "eksempelside", "untitled", "uten tittel", "ny side", "new page"}
 NEWS_SKIP_SEGMENTS = {"side", "page", "kategori", "category", "tag", "tags", "author", "forfatter", "feed", "arkiv", "archive"}
 JOB_SEGMENTS = {
     "ledige-stillinger", "stillinger", "stilling", "karriere", "career", "careers", "jobb", "jobs",
@@ -363,21 +366,44 @@ def article_date(soup: BeautifulSoup, url: str) -> tuple[str, str, str] | None:
     return None
 
 
-def _title(soup: BeautifulSoup) -> str:
+def _fold(text: str) -> str:
+    text = unicodedata.normalize("NFKD", str(text or "").casefold().replace("ø", "o").replace("æ", "ae"))
+    return "".join(c for c in text if not unicodedata.combining(c))
+
+
+def _slug_words(url: str) -> set[str]:
+    segments = [s for s in urllib.parse.urlparse(url).path.split("/") if s]
+    last = re.sub(r"\.(html?|php|aspx?)$", "", urllib.parse.unquote(segments[-1])) if segments else ""
+    return {w for w in re.split(r"[^0-9a-z]+", _fold(last)) if len(w) > 2 and not w.isdigit()}
+
+
+def _title(soup: BeautifulSoup, url: str | None = None) -> str:
+    """The page's heading. On an article page (url given) whose address names it, the candidate
+    heading that shares the most words with that address wins, so a site logo set in the first
+    <h1> is not taken for every article's title."""
+    candidates: list[str] = []
     for selector in ("article h1", "main h1", "h1", 'meta[property="og:title"]'):
-        node = soup.select_one(selector)
-        if node is not None:
+        for node in soup.select(selector):
             text = node.get("content") if node.name == "meta" else node.get_text(" ", strip=True)
-            text = " ".join(str(text or "").split())
-            if len(text) >= 4:
-                return text[:300]
+            text = " ".join(str(text or "").split())[:300]
+            if len(text) >= 4 and text not in candidates:
+                candidates.append(text)
+    words = _slug_words(url) if url else set()
+    if candidates and len(words) >= 2:
+        def overlap(text: str) -> int:
+            return len(words & {w for w in re.split(r"[^0-9a-z]+", _fold(text)) if len(w) > 2})
+        best = max(candidates, key=lambda text: (overlap(text), -candidates.index(text)))
+        if overlap(best) > overlap(candidates[0]):
+            return best
+    if candidates:
+        return candidates[0]
     return " ".join((soup.title.get_text(" ", strip=True) if soup.title else "").split())[:300]
 
 
 def article_item(page: dict[str, Any], soup: BeautifulSoup) -> dict[str, Any] | None:
     """A dated news item read from the article's own page: its heading and its own publication date."""
     found = article_date(soup, page["url"])
-    title = _title(soup)
+    title = _title(soup, page["url"])
     if not found or not title:
         return None
     return {
@@ -395,6 +421,44 @@ def article_item(page: dict[str, Any], soup: BeautifulSoup) -> dict[str, Any] | 
     }
 
 
+def _title_node(soup: BeautifulSoup, title: str) -> str | None:
+    """The text of one node (an <h1> or <title> with a single text child, or og:title) that reads
+    exactly the item's title, ignoring case and whitespace."""
+    want = " ".join(str(title or "").split()).casefold()
+    if not want:
+        return None
+    for node in soup.select("h1, title"):
+        text = " ".join(str(node.string or "").split())
+        if text and text.casefold() == want:
+            return text
+    for meta in soup.select('meta[property="og:title"]'):
+        text = " ".join(str(meta.get("content") or "").split())
+        if text and text.casefold() == want:
+            return text
+    return None
+
+
+def _heading_inside(soup: BeautifulSoup, teaser: str) -> str | None:
+    """A listing teaser often runs date, title and excerpt together ("19.4.2026 Singer - Songwriter,
+    et aktivt halvår Mens opptaket ..."): the article's own single-node <h1>, when the teaser
+    contains it, is the title."""
+    text = " ".join(str(teaser or "").split()).casefold()
+    for node in soup.select("h1"):
+        heading = " ".join(str(node.string or "").split())
+        if len(heading.split()) >= 2 and heading.casefold() in text and len(heading) < len(text):
+            return heading
+    return None
+
+
+def _section_page(page: dict[str, Any], soup: BeautifulSoup, domain: str, title: str) -> bool:
+    """An undated page reached from a listing teaser that is itself a section or category: it lists
+    dated teasers, or lists itself as one (a category menu), or the teaser's title is a one- or
+    two-word label ("Nyheter", "Inspirasjon")."""
+    teasers = _listing_inline_items(page, soup, domain)
+    own = page["url"].rstrip("/")
+    return len(teasers) >= 2 or any(t["url"].rstrip("/") == own for t in teasers) or len(str(title).split()) <= 2
+
+
 def _soup(page: dict[str, Any]) -> BeautifulSoup:
     return BeautifulSoup(page["raw"].decode("utf-8", errors="replace"), "lxml")
 
@@ -407,13 +471,27 @@ def _segments(url: str) -> list[str]:
     return [s for s in urllib.parse.urlparse(url).path.casefold().split("/") if s]
 
 
+TRACKING_PARAM = re.compile(r"^(utm_|fbclid$|gclid$|mc_cid$|mc_eid$|_hs(enc|mi)$)", re.I)
+
+
+def clean_url(url: str) -> str:
+    """The page's own address: no fragment and no campaign-tracking parameters (feeds often append
+    ?utm_source=rss...); other query parameters are kept."""
+    url = urllib.parse.urldefrag(url)[0]
+    parsed = urllib.parse.urlparse(url)
+    if not parsed.query:
+        return url
+    kept = [(k, v) for k, v in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True) if not TRACKING_PARAM.match(k)]
+    return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(kept)))
+
+
 def _same_site_links(base_url: str, soup: BeautifulSoup, domain: str) -> list[tuple[str, str]]:
     links: dict[str, str] = {}
     for anchor in soup.select("a[href]"):
         href = str(anchor.get("href") or "").strip()
         if not href or href.startswith(("mailto:", "tel:", "javascript:")):
             continue
-        url = urllib.parse.urldefrag(urllib.parse.urljoin(base_url, href))[0]
+        url = clean_url(urllib.parse.urljoin(base_url, href))
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme not in {"http", "https"} or registered_domain(url) != domain:
             continue
@@ -437,20 +515,30 @@ NEWS_TOKENS = {"aktuelt", "nyheter", "nyhet", "nyheiter", "news", "blogg", "blog
 
 
 def _news_index(segments: list[str]) -> int | None:
-    for index, segment in enumerate(segments):
+    for index, raw in enumerate(segments):
+        segment = re.sub(r"\.(html?|php|aspx?)$", "", raw)  # "/nyheter.html" is the news section too
         if segment in NEWS_SEGMENTS or (set(re.split(r"[-_]", segment)) & NEWS_TOKENS and "nyhetsbrev" not in segment):
             return index
     return None
 
 
+def _shop_blog(segments: list[str]) -> bool:
+    """Shopify keeps posts under /blogs/<blog>/<post>; /blogs/<blog> is the listing."""
+    return len(segments) >= 2 and segments[0] == "blogs"
+
+
 def is_news_listing(url: str) -> bool:
     segments = _segments(url)
+    if _shop_blog(segments):
+        return len(segments) == 2
     index = _news_index(segments)
     return index is not None and index == len(segments) - 1
 
 
 def is_news_article(url: str) -> bool:
     segments = _segments(url)
+    if _shop_blog(segments):
+        return len(segments) == 3 and bool(re.search(r"[a-z]", segments[2]))
     index = _news_index(segments)
     if index is None or index == len(segments) - 1:
         return False
@@ -480,7 +568,7 @@ def parse_feed(page: dict[str, Any], domain: str) -> list[dict[str, Any]]:
             link = (link_node.get("href") if link_node is not None else "") or ""
             raw_date = (entry.findtext(f"{atom}published") or entry.findtext(f"{atom}updated") or "").strip()
             iso, method = parse_iso(raw_date), "atom_published" if entry.findtext(f"{atom}published") else "atom_updated"
-        link = urllib.parse.urljoin(page["url"], link)
+        link = clean_url(urllib.parse.urljoin(page["url"], link))
         if not (title and link and iso) or registered_domain(link) != domain:
             continue
         items.append({
@@ -503,7 +591,7 @@ def _listing_inline_items(listing: dict[str, Any], soup: BeautifulSoup, domain: 
     """Dated teasers on a listing page: an article link whose small container shows a date."""
     items: dict[str, dict[str, Any]] = {}
     for anchor in soup.select("a[href]"):
-        url = urllib.parse.urldefrag(urllib.parse.urljoin(listing["url"], str(anchor.get("href"))))[0]
+        url = clean_url(urllib.parse.urljoin(listing["url"], str(anchor.get("href"))))
         if registered_domain(url) != domain or not is_news_article(url) or url in items:
             continue
         container = anchor
@@ -554,7 +642,7 @@ def _jsonld_article_items(page: dict[str, Any], soup: BeautifulSoup, domain: str
         published = parse_iso(node.get("datePublished"))
         if not (url and title and published):
             continue
-        url = urllib.parse.urldefrag(urllib.parse.urljoin(page["url"], str(url)))[0]
+        url = clean_url(urllib.parse.urljoin(page["url"], str(url)))
         if registered_domain(url) != domain or url.rstrip("/") == page["url"].rstrip("/"):
             continue  # the page's own date belongs to the page, not to a listed item
         items.append({
@@ -797,12 +885,36 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
     for item in ordered:
         if item["source_page"] != item["url"]:
             page = fetcher.get(item["url"], "news_upgrade")
-            article = article_item(page, _soup(page)) if _is_html(page) else None
+            soup = _soup(page) if _is_html(page) else None
+            article = article_item(page, soup) if soup is not None else None
             if article and article["url"] not in {i["url"] for i in upgraded}:
                 item = article
+            elif soup is not None and _section_page(page, soup, domain, item["title"]):
+                continue  # the linked page is a section or category page, not an article
+            elif soup is not None and page["url"] not in {i["url"] for i in upgraded}:
+                # The article prints no machine-readable date, but it is the item's own page: cite it
+                # for the title (one node that reads exactly the title) and keep the listing or feed
+                # that printed the date as the date's evidence.
+                heading = _title_node(soup, item["title"]) or _heading_inside(soup, item["title"])
+                if heading:
+                    item = {**item, "title": heading, "url": page["url"], "source_page": page["url"], "content_sha256": page["content_sha256"],
+                            "retrieved_at": page["retrieved_at"], "claim_span": heading, "extraction_method": "article_page:title",
+                            "date_source_page": item["source_page"], "date_content_sha256": item["content_sha256"],
+                            "date_retrieved_at": item["retrieved_at"], "date_extraction_method": item["extraction_method"]}
         upgraded.append(item)
+    upgraded = clean_news_items(upgraded)
     upgraded.sort(key=lambda item: item["published_date"], reverse=True)
     return {"items": upgraded, "checked_pages": checked}
+
+
+def clean_news_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A title shared by three or more items is the site's name or a section label, not each
+    article's own title: such items are dropped. (Template posts such as "Hello world!" are real
+    dated posts and stay; the summary does not present them as news.)"""
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[_fold(item["title"])] = counts.get(_fold(item["title"]), 0) + 1
+    return [item for item in items if counts[_fold(item["title"])] < 3]
 
 
 # ---------------------------------------------------------------- jobs

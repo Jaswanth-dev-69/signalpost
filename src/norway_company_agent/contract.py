@@ -510,6 +510,24 @@ def profile_to_contract_envelope(
                                                     "period": earlier_period, **figures}, "available", 1.0, ids)
             claim["reporting_period"] = earlier_period
 
+    # 6c. The kit's own readers find company-site news among the website record's bounded `pages`
+    # (news-path pages). Our news is read from listings, feeds and articles fetched separately, so
+    # the listing pages that produced published items are added to that list, with their own hash
+    # and fetch time. Nothing new is claimed; the pages were fetched and the items published above.
+    web_record = records.get("website") or {}
+    web_value = web_record.get("value") or {}
+    news_listings = [page for page in ((profile.get("web_claims") or {}).get("news") or {}).get("checked_pages") or []
+                     if isinstance(page, dict) and page.get("url") and _valid_hash(page.get("content_sha256"))]
+    if (news_listings and any(c.get("field") == "dated_news" and c.get("availability") == "available" for c in claims)
+            and web_record.get("status") == "available" and (web_value.get("identity_assessment") or {}).get("publishable")):
+        pages = web_value.setdefault("pages", [])
+        known = {str(page.get("url")) for page in pages if isinstance(page, dict)}
+        for page in news_listings[:3]:
+            if page["url"] not in known and not re.search(r"(feed|rss|atom)(/|\.xml|$)|\.xml$", page["url"], re.I):
+                pages.append({"url": page["url"], "title": " ".join(str(page.get("claim_span") or "").split())[:500],
+                              "content_sha256": page["content_sha256"], "retrieved_at": page.get("retrieved_at"), "page_role": "news_listing"})
+                known.add(page["url"])
+
     # 7. Summary profile (synthesis)
     summary_text = profile.get("synthesis_summary")
     if summary_text:
@@ -617,9 +635,9 @@ def _external_hedges(org: str, claims: list[dict[str, Any]], evidence: dict[str,
         meta = {"text": ev["claim_span"], "source": ev["source_url"], "retrievedAt": ev["retrieved_at"], "hash": ev["content_sha256"],
                 "rightsStatus": "approved", "sourceClass": "company_site"}
         if news:
-            posts.append({"title": claim.get("title"), "url": url, "date_published": published, **meta})
+            posts.append({"title": claim.get("title"), "url": url, "date_published": published, "organisation_number": org, **meta})
         else:
-            jobs.append({"title": claim.get("title"), "job_url": url, "kind": claim.get("kind"), "date_posted": published, **meta})
+            jobs.append({"title": claim.get("title"), "job_url": url, "kind": claim.get("kind"), "date_posted": published, "organisation_number": org, **meta})
     return {"observations": observations, "company_site": {"posts": posts, "jobs": jobs}}
 
 BOILERPLATE = re.compile(r"cookie|informasjonskapsl|javascript|personvern|privacy|logg inn|log in|handlekurv|nettleser|browser", re.I)
@@ -710,7 +728,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         if careers:
             url, evs, attrs = careers
             claim = base_add_claim("hiring_signal", url, "available", round(0.9 * scale, 3), evs)
-            claim.update({**attrs, "verification_method": site_method})
+            claim.update({**attrs, "verification_method": site_method, "organisation_number": org})
             emitted.add(url.rstrip("/").casefold())
         site_confidence = round(0.9 * scale, 3)
         for url, evs, attrs in [*site_postings, *nav_postings]:
@@ -720,7 +738,7 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
             emitted.add(key)
             nav_item = attrs.get("platform") == "arbeidsplassen.nav.no"
             claim = base_add_claim("hiring_signal", url, "available", 0.95 if nav_item else site_confidence, evs)
-            claim.update(attrs if nav_item else {**attrs, "verification_method": site_method})
+            claim.update({**attrs, "organisation_number": org} if nav_item else {**attrs, "verification_method": site_method, "organisation_number": org})
         if not emitted:
             states_with_check = fallback_evs + ([nav_checked_ev] if nav_checked_ev and fallback_state == "not_available" else [])
             claim = base_add_claim("hiring_signal", None, fallback_state, fallback_confidence, states_with_check)
@@ -803,11 +821,14 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
             source, method = item.get("source_page"), item.get("extraction_method") or "news_page_text"
             # A news item's effective date is its own publication timestamp.
             ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("claim_span"), f"news_{item.get('url')}", method, stamp)
-            date_ev = add_evidence(source, "company_owned", item.get("retrieved_at"), item.get("content_sha256"), item.get("date_span"), f"news_date_{item.get('url')}", method, stamp) if item.get("date_span") else None
+            date_ev = add_evidence(item.get("date_source_page") or source, "company_owned", item.get("date_retrieved_at") or item.get("retrieved_at"),
+                                   item.get("date_content_sha256") or item.get("content_sha256"), item.get("date_span"), f"news_date_{item.get('url')}",
+                                   item.get("date_extraction_method") or method, stamp) if item.get("date_span") else None
             if ev:
                 news_seen.add(value)
                 claim = add_claim("dated_news", value, "available", 0.9, [ev, date_ev])
-                claim.update({"title": item["title"], "published_at": stamp, "url": item.get("url"), "date_source": item.get("date_source"), "source_url": item.get("source_page")})
+                claim.update({"title": item["title"], "published_at": stamp, "url": item.get("url"), "date_source": item.get("date_source"),
+                              "source_url": item.get("source_page"), "organisation_number": org})
                 news_count += 1
         if not news_count:
             checked = [add_evidence(p.get("url"), "company_owned", p.get("retrieved_at"), p.get("content_sha256"), p.get("claim_span"), "news_checked") for p in news.get("checked_pages") or []]
