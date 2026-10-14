@@ -101,15 +101,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profiles", required=True, help="saved profiles (RUN.profiles.jsonl) to build both sides from")
     parser.add_argument("--base", default="pre-v5", help="git ref of the code before the S/U work")
+    parser.add_argument("--new", default=None, help="git ref to build the new side from (default: the working tree)")
     parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()
     profiles = [json.loads(line) for line in Path(args.profiles).read_text(encoding="utf-8").splitlines() if line.strip()]
     if args.limit:
         profiles = profiles[: args.limit]
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as tmp_new:
         export_ref(args.base, Path(tmp))
         base_build, _ = load_contract(Path(tmp))
-        new_build, new_summary = load_contract(ROOT)
+        if args.new:
+            export_ref(args.new, Path(tmp_new))
+        new_build, new_summary = load_contract(Path(tmp_new) if args.new else ROOT)
         if new_summary is None:
             print("working tree has no apply_envelope_summary")
             return 1
@@ -128,7 +131,7 @@ def main() -> int:
                 failures[problem.split(":")[0]] += 1
             if problems and len(examples) < 8:
                 examples.append(f"{profile.get('organisation_number')}: {problems[0]}")
-    print(f"regression guard vs {args.base}: {len(profiles)} profiles; allowed additions (available claims): {dict(added)}")
+    print(f"regression guard {args.new or 'working tree'} vs {args.base}: {len(profiles)} profiles; allowed additions (available claims): {dict(added)}")
     if failures:
         print("REGRESSION GUARD FAILED")
         for kind, count in failures.most_common():

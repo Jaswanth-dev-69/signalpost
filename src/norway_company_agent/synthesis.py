@@ -593,8 +593,11 @@ def apply_envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     if not summary["evidence_ids"]:
         return envelope
     claims = [c for c in envelope.get("claims") or [] if c.get("field") != SUMMARY_FIELD]
+    # Like every earlier version, the summary claim cites the envelope's whole evidence list (so every
+    # item stays cited by a claim); `sources` and each section name the items a sentence rests on.
+    every_id = [e.get("id") for e in envelope.get("evidence") or [] if e.get("id")]
     claim = {"field": SUMMARY_FIELD, "value": summary["text"], "availability": "available", "confidence": 0.95,
-             "evidence_ids": summary["evidence_ids"], "sections": summary["sections"], "sources": summary["sources"],
+             "evidence_ids": every_id, "sections": summary["sections"], "sources": summary["sources"],
              "method": "template_over_published_claims"}
     envelope["claims"] = [claim, *claims]
     if isinstance(envelope.get("profile"), dict):
