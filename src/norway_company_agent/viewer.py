@@ -110,6 +110,8 @@ def viewer_record(envelope: dict[str, Any]) -> dict[str, Any]:
                                                  value.get("latest_submitted_accounts") and f"latest year {value.get('latest_submitted_accounts')}") if v)
         elif field == "dated_news":
             shown = _short(claim.get("title") or value, 120)
+        elif field == "registered_activity" and isinstance(value, list):
+            shown = _short(" ".join(str(x) for x in value), 300)
         elif field == "former_names" and isinstance(value, list):
             shown = "; ".join(f"{n.get('name')} (until {str(n.get('until') or '')[:10]})" for n in value if isinstance(n, dict))
         elif field == "group_accounts" and isinstance(value, list):
@@ -240,7 +242,8 @@ def viewer_record(envelope: dict[str, Any]) -> dict[str, Any]:
         "rd": READABLE_ENTITY.format(org=org) if org else None,
         "ga": [str(v)[:4] for v in (val("group_accounts") or [])], "ev": events,
         "gf": group_years,
-        "act": val("registered_activity"), "aS": first_src("registered_activity"), "rS": first_src("legal_name"),
+        "act": " ".join(" ".join(str(x) for x in val("registered_activity")).split()) if isinstance(val("registered_activity"), list) else val("registered_activity"),
+        "aS": first_src("registered_activity"), "rS": first_src("legal_name"),
         "acc": {"c": ACCOUNTING_PLAIN.get((val("accounting_obligation") or {}).get("classification"), (val("accounting_obligation") or {}).get("classification")) if isinstance(val("accounting_obligation"), dict) else None,
                 "r": (val("accounting_obligation") or {}).get("reason") if isinstance(val("accounting_obligation"), dict) else None,
                 "y": (val("accounting_obligation") or {}).get("latest_submitted_accounts") if isinstance(val("accounting_obligation"), dict) else None,

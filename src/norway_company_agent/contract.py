@@ -66,6 +66,15 @@ def _evidence_id(source_url: str, field_name: str, index: int) -> str:
     return "ev-" + hashlib.sha256(raw.encode()).hexdigest()[:12]
 
 
+def _same_day(published: Any, retrieved: Any) -> bool:
+    """Within a day of each other (pages print local time; fetch times are UTC)."""
+    try:
+        from datetime import date as _date
+        return abs((_date.fromisoformat(str(published)[:10]) - _date.fromisoformat(str(retrieved)[:10])).days) <= 1
+    except ValueError:
+        return False
+
+
 def _valid_hash(value: Any) -> bool:
     return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
 
@@ -476,7 +485,8 @@ def profile_to_contract_envelope(
     activity_lines = [str(line) for line in (live_value.get("activity") or live_value.get("statutory_purpose") or []) if str(line).strip()]
     if live_ok and activity_key and activity_lines:
         ev = evidence_from(live, f'"{activity_key}":[{json.dumps(activity_lines[0], ensure_ascii=False)}', "registry_activity", "official_registry_live")
-        add_claim("registered_activity", " ".join(" ".join(activity_lines).split()), "available", 1.0, [ev])
+        # The register prints the text as lines; the value keeps those lines exactly, so each is verbatim in the source.
+        add_claim("registered_activity", activity_lines, "available", 1.0, [ev])
     else:
         add_claim("registered_activity", None, "not_available" if live_ok else fetch_state(live or None), 0.9, [entity_ev])
     former = sorted((item for item in live_value.get("former_names") or [] if isinstance(item, dict) and item.get("navn")),
@@ -842,7 +852,11 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
         news = web_claims.get("news") or {}
         news_count = 0
         news_seen: set[str] = set()
-        for item in (news.get("items") or [])[:MAX_NEWS_ITEMS]:
+        news_items = (news.get("items") or [])[:MAX_NEWS_ITEMS]
+        # A site whose pages print the current time gives every item the day it was fetched: such
+        # dates are not publication dates and would not survive a re-check, so none is published.
+        page_stamped = len(news_items) >= 2 and all(_same_day(i.get("published_date"), i.get("retrieved_at")) for i in news_items)
+        for item in [] if page_stamped else news_items:
             stamp = item.get("published_at") or item.get("published_date")
             value = news_value(item["title"], stamp)
             if value in news_seen:

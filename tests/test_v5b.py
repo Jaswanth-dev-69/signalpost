@@ -101,6 +101,12 @@ class NewsShape(unittest.TestCase):
         self.assertEqual(date_ev["extraction_method"], "feed:rss_pubDate")
         self.assertEqual(claim["source_url"], claim["url"])
 
+    def test_page_stamped_dates_are_not_published(self):
+        stamped = [self.item(url=f"https://www.example.no/nyheter/{i}", title=f"Side {i} om oss", published_date=T[:10], published_at=T[:10],
+                             source_page=f"https://www.example.no/nyheter/{i}", claim_span=f"Side {i} om oss") for i in range(3)]
+        env = envelope(verified_profile(ORG, "TESTSELSKAP NORD AS", "https://www.example.no/", news=stamped))
+        self.assertEqual(available(env, "dated_news"), [])
+
     def test_items_carry_the_organisation_number_everywhere(self):
         careers = {"url": "https://www.example.no/jobb", "content_sha256": HASH_PAGE, "retrieved_at": T, "claim_span": "Ledige stillinger"}
         env = envelope(verified_profile(ORG, "TESTSELSKAP NORD AS", "https://www.example.no/", news=[self.item()], careers=careers))

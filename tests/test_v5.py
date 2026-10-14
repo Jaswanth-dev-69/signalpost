@@ -59,7 +59,9 @@ class RegisterAdditions(unittest.TestCase):
 
     def test_registered_activity_is_quoted_verbatim_from_the_live_record(self):
         claim = available(self.env, "registered_activity")[0]
-        self.assertEqual(claim["value"], "Utvikling og salg av ladeutstyr for elbiler og tilhørende tjenester.")
+        self.assertEqual(claim["value"], ["Utvikling og salg av ladeutstyr for", "elbiler og tilhørende tjenester."])
+        for line in claim["value"]:
+            self.assertIn(line, RAW_ENTITY)
         span = self.evidence[claim["evidence_ids"][0]]["claim_span"]
         self.assertIn(span, RAW_ENTITY)
 
@@ -267,7 +269,7 @@ class SummaryRules(unittest.TestCase):
         self.assertNotIn("lists open positions", text)
 
     def test_activity_text_is_glossed_in_english(self):
-        env = self.env_with({"field": "registered_activity", "value": "Drift av barnehage og tilhørende virksomhet, herunder deltakelse i andre selskaper."})
+        env = self.env_with({"field": "registered_activity", "value": ["Drift av barnehage og tilhørende virksomhet, herunder", "deltakelse i andre selskaper."]})
         env["claims"] = [c for c in env["claims"] if c["field"] != "registered_activity" or "barnehage" in str(c.get("value"))]
         text = envelope_summary(env)["text"]
         self.assertIn("in English, this text mentions kindergarten and owning shares in other companies", text)

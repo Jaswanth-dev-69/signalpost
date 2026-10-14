@@ -574,7 +574,8 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     prev = history[0]["value"] if history else None
     comparable = bool(prev and has_accounts and _comparable(period) and _comparable(prev.get("period")))
     fin_claims = [c for f in fin_fields for c in available(f)] + ([period_claim] if period_claim else [])
-    activity = str(value("registered_activity") or "")
+    activity_value = value("registered_activity")
+    activity = " ".join(" ".join(str(x) for x in activity_value).split()) if isinstance(activity_value, list) else str(activity_value or "")
     description = str(value("company_description") or "")
     activity_gloss = None
     found: list[tuple[int, str]] = []
