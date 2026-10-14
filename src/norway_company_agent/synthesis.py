@@ -337,21 +337,21 @@ HOLDING_TEXT = re.compile(r"investering|eie (og forvalte )?aksjer|eierskap|aksje
 PROPERTY_TEXT = re.compile(r"(utleie|kjøp og salg|forvaltning|drift|utvikling|eie) av (egen |fast )?(fast )?eiendom|eiendomsdrift|eiendomsutvikling|utleie av bolig", re.I)
 # English for common terms in Norwegian activity texts (a reader aid: the original text is quoted next to it).
 ACTIVITY_TERMS = (
-    (r"barnehage", "kindergarten"), (r"tannleg|tannhelse|tannklinikk", "dental care"), (r"legesenter|legekontor|legetjenest|medisinsk", "medical services"),
+    (r"barnehage", "kindergarten"), (r"tannleg|tannhelse|tannklinikk", "dental care"), (r"\blege(senter|kontor|tjenest|praksis)|\bmedisinsk", "medical services"),
     (r"fysioterapi", "physiotherapy"), (r"psykolog", "psychology"), (r"frisør", "hairdressing"), (r"hudpleie|skjønnhet|kosmetisk", "beauty care"),
     (r"restaurant|servering|kafé|kafe\b|catering|take-?out", "restaurants/catering"), (r"hotell|overnatting|utleie av hytte", "accommodation"),
     (r"borettslag|boligsameie", "housing cooperative"), (r"eiendom", "real estate"), (r"oppføring av|bygg(e|virksomhet|arbeid)|entrepren", "construction"),
     (r"tømrer|snekker", "carpentry"), (r"maler|malearbeid", "painting"), (r"rørlegg|vvs", "plumbing"), (r"elektronikk", "electronics"), (r"elektriker|elektroinstallasjon|elektrisk installasjon|elektroentrepren", "electrical installation"),
     (r"grunnarbeid|graving|anleggsarbeid|maskinentrepren", "groundworks"), (r"taxi|drosje", "taxi services"),
     (r"transport|frakt|budtjenest|logistikk|spedisjon", "transport/logistics"), (r"regnskap|bokføring", "accounting"), (r"revisjon", "auditing"),
-    (r"konsulent|rådgivning", "consulting"), (r"programvare|software|datasystem|systemutvikling|\bit[- ]|informasjonsteknologi", "software/IT"),
+    (r"konsulent|rådgivning", "consulting"), (r"programvare|software|systemutvikling", "software"), (r"\bit[- ]|informasjonsteknologi|datasystem|ikt\b", "IT"),
     (r"detaljhandel|butikk|nettbutikk|netthandel", "retail"), (r"\bhandel\b|handelsvirksomhet", "trade"), (r"engros|agentur", "wholesale"), (r"import|eksport", "import/export"),
     (r"tilvirkning|fabrikasjon|fabrikk|industri", "manufacturing"), (r"produksjon", "production"), (r"landbruk|jordbruk|gårdsdrift|husdyr", "agriculture"),
     (r"skogbruk|skogsdrift|skogsentrepren|tømmer", "forestry"), (r"fiske|havbruk|oppdrett", "fishing/aquaculture"), (r"reklame|markedsføring", "marketing"),
     (r"undervisning|opplæring|kurs\b|skole", "education/training"), (r"trening|treningssenter|idrett", "sports/fitness"),
     (r"reiseliv|reisebyrå|turisme|opplevelse", "tourism"), (r"forsikring", "insurance"), (r"utlån|kreditt|finansier", "finance"),
     (r"renhold|vask\b|rengjøring", "cleaning"), (r"vakthold|sikkerhet", "security services"), (r"bilverksted|bilsalg|kjøretøy|\bbil(er)?\b", "motor vehicles"),
-    (r"båt", "boats"), (r"reparasjon|verksted|vedlikehold", "repair/maintenance"), (r"rederi|skipsfart|maritim", "shipping"),
+    (r"båt", "boats"), (r"reparasjon|verksted|vedlikehold", "repair/maintenance"), (r"rederi|skipsfart", "shipping"), (r"maritim", "maritime activities"),
     (r"petroleum|olje|naturgass", "oil/gas"), (r"energi|kraftproduksjon|strøm", "energy"), (r"arkitekt", "architecture"),
     (r"ingeniør", "engineering"), (r"advokat|juridisk", "legal services"), (r"helse|omsorg|pleie", "health/care"),
     (r"design", "design"), (r"foto", "photography"), (r"musikk|konsert", "music"), (r"film|tv-produksjon", "film/TV"),
@@ -419,7 +419,9 @@ def _change(old: float, new: float, currency: str | None, noun: str, old_label: 
     if old == new:
         return f"{noun} was {show(new)} in both {old_label} and {new_label}"
     if _money(old, currency) == _money(new, currency):
-        return f"{noun} was about {show(new)} in both {old_label} and {new_label}"
+        if result:
+            return f"{noun} was a {'loss' if new < 0 else 'profit'} of about {_money(abs(new), currency)} in both {old_label} and {new_label}"
+        return f"{noun} was about {_money(new, currency)} in both {old_label} and {new_label}"
     tiny = min(abs(old), abs(new)) < small
     if old > 0 and new > 0:
         if tiny or new >= 10 * old or old >= 10 * new:
@@ -556,6 +558,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                          key=lambda c: str(((c["value"].get("period") or {}).get("tilDato")) or ""), reverse=True)
     group_latest = group_years[0]["value"] if group_years else None
     group_label = _period_label(group_latest.get("period")) if group_latest else ""
+    g_currency = (group_latest or {}).get("currency")
     roles = [r for r in (value("registered_roles") or []) if isinstance(r, dict) and not r.get("inactive")]
     site = value("official_website")
     socials = available("social_profile")
@@ -564,7 +567,9 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     postings = [c for c in signals if c.get("kind") == "job_posting"]
     news = sorted((c for c in available("dated_news") if c.get("published_at")), key=lambda c: str(c.get("published_at")), reverse=True)
     stamped = len(news) >= 2 and all(str(c.get("published_at"))[:10] == run_text for c in news)  # pages that print today's date
-    real_news = [c for c in news if not _placeholder(c) and not stamped and not SEASONAL_NEWS.search(str(c.get("title") or ""))
+    junk_news = [c for c in news if _placeholder(c) or stamped]
+    news = [c for c in news if not _placeholder(c) and not stamped]
+    real_news = [c for c in news if not SEASONAL_NEWS.search(str(c.get("title") or ""))
                  and not (str(c.get("published_at"))[:10] == run_text and c.get("date_source") in ("page_text_date", "listing_text_date"))]
     # The item named in "What changed": the newest one about the business (contracts, launches,
     # results, appointments) from the last year, else the newest item.
@@ -578,17 +583,22 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     activity = " ".join(" ".join(str(x) for x in activity_value).split()) if isinstance(activity_value, list) else str(activity_value or "")
     description = str(value("company_description") or "")
     activity_gloss = None
+    matches = []
+    for pattern, english in (*ACTIVITY_TERMS, (HOLDING_TEXT.pattern, "owning shares in other companies"), (PROPERTY_TEXT.pattern, "real estate")):
+        for match in re.finditer(pattern, activity, re.I):
+            matches.append((match.start(), -(match.end() - match.start()), match.end(), english))
     found: list[tuple[int, str]] = []
     taken: list[tuple[int, int]] = []
-    for pattern, english in sorted((*ACTIVITY_TERMS, (HOLDING_TEXT.pattern, "owning shares in other companies"),
-                                    (PROPERTY_TEXT.pattern, "real estate")), key=lambda t: -len(t[0])):
-        for match in re.finditer(pattern, activity, re.I):
-            if any(a <= match.start() < b for a, b in taken):
-                continue  # inside a longer term already translated ("skogsentreprenør" is forestry, not construction)
-            if english not in [e for _, e in found]:
-                found.append((match.start(), english))
-            taken.append((match.start(), match.end()))
-            break
+    for start, _neg, end, english in sorted(matches):
+        if any(start < b and end > a for a, b in taken):
+            continue  # the longest term at a place wins ("skogsentreprenør" is forestry, not construction)
+        taken.append((start, end))
+        if english == "owning shares in other companies" and start > 60 and len(matches) > 1:
+            continue  # "... herunder delta i andre selskaper" at the end is boilerplate, not the activity
+        if form in HOUSING_FORMS and english == "housing cooperative":
+            continue
+        if english not in [e for _, e in found]:
+            found.append((start, english))
     terms = [e for _, e in sorted(found)][:3]
     if terms:
         activity_gloss = f"mentions {_join(terms)}"
@@ -609,8 +619,8 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                 and _clean_name(item.get("name")).casefold() not in {_clean_name(f.get("name")).casefold() for f in former}:
             former.append(item)
     if former:
-        listed = "; ".join(_clean_name(f.get("name")) + (f" (until {str(f.get('until'))[:10]})" if f.get("until") else "") for f in former[:4])
-        status_sentences.append((f"Earlier names in the register: {listed}" + (f" and {len(former) - 4} more" if len(former) > 4 else ""), available("former_names")))
+        listed = "; ".join(_clean_name(f.get("name")) + (f" (until {str(f.get('until'))[:10]})" if f.get("until") else "") for f in former[:8])
+        status_sentences.append((f"Earlier names in the register: {listed}", available("former_names")))
     section("identity", "Company", [(identity, [c for c in (first("organisation_number"), *available("legal_form"), *available("municipality"), *available("founded_date")) if c]), *status_sentences])
 
     # 2. What it does -----------------------------------------------------------------------------
@@ -657,33 +667,40 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         sentence = f"Its latest filed {whose} ({latest_label}) report {_join(parts)}" if parts else f"Its latest filed {whose} cover {latest_label}"
         if tail:
             sentence += f", with {_join(tail)}"
+        parent_at = len(money)
         money.append((sentence, fin_claims))
-        if group_latest:
-            g_parts = []
-            if group_latest.get("revenue") is not None:
-                g_parts.append(f"revenue of {_money(group_latest['revenue'], currency)}")
-            for field, kind in (("operating_result", "operating"), ("annual_result", "annual")):
-                value_ = group_latest.get(field)
-                if value_ is not None:
-                    g_parts.append(f"an {kind} {'loss' if value_ < 0 else 'profit'} of {_money(abs(value_), currency)}")
-            g_tail = f", with total assets of {_money(group_latest['assets'], currency)}" if group_latest.get("assets") is not None else ""
-            money.append((f"The group (konsern) accounts for {group_label} report {_join(g_parts)}{g_tail}", group_years[:1]))
-        elif parent_only:
-            years = sorted({str(p)[:4] for p in (group[0].get("value") or []) if p}, reverse=True)
-            money.append(("The register also holds group (konsern) accounts" + (f" for {_join(years[:3])}" if years else ""), group))
         operating, annual = latest["operating_result"], latest["annual_result"]
         if operating is not None and annual is not None and abs(annual - operating) > max(100_000, 0.25 * abs(operating)):
             gap = annual - operating
-            money.append((f"Net financial items and tax {'added' if gap > 0 else 'took'} {_money(abs(gap), currency)} between the operating result and the {result_noun}",
+            op_text = f"an operating {'loss' if operating < 0 else 'profit'} of {_money(abs(operating), currency)}"
+            an_text = f"{'a' if result_noun != 'annual result' else 'an annual'} {'loss' if annual < 0 else 'profit'}{' for the period' if result_noun != 'annual result' else ''} of {_money(abs(annual), currency)}"
+            verb = "turned" if (operating < 0) != (annual < 0) else ("lifted" if gap > 0 else "reduced")
+            link = "into" if verb == "turned" else "to"
+            what = "Financial income, net of tax," if gap > 0 else "Financial costs and tax"
+            whose_items = " in the parent company's accounts" if parent_only else ""
+            money.append((f"{what} of {_money(abs(gap), currency)} {verb} {op_text} {link} {an_text}{whose_items}",
                           available("operating_result") + available("annual_result")))
+        if group_latest:
+            g_parts = []
+            if group_latest.get("revenue") is not None:
+                g_parts.append(f"revenue of {_money(group_latest['revenue'], g_currency)}")
+            for field, kind in (("operating_result", "operating"), ("annual_result", "annual")):
+                value_ = group_latest.get(field)
+                if value_ is not None:
+                    g_parts.append(f"an {kind} {'loss' if value_ < 0 else 'profit'} of {_money(abs(value_), g_currency)}")
+            g_tail = f", with total assets of {_money(group_latest['assets'], g_currency)}" if group_latest.get("assets") is not None else ""
+            money.insert(parent_at, (f"The group (konsern) accounts for {group_label} report {_join(g_parts)}{g_tail}", group_years[:1]))
+        elif parent_only:
+            years = sorted({str(p)[:4] for p in (group[0].get("value") or []) if p}, reverse=True)
+            money.append(("The register also holds group (konsern) accounts" + (f" for {_join(years[:3])}" if years else ""), group))
         if latest["assets"] is not None and latest["debt"] is not None and latest["debt"] > latest["assets"]:
             money.append((f"Its debt exceeds its total assets, so its equity at the end of {latest_label} was negative", available("assets") + available("debt")))
-            material.append((f"Its equity was negative at the end of {latest_label}", available("assets") + available("debt")))
+            material.append(("Its equity is negative", available("assets") + available("debt")))
         elif latest["assets"] is not None and latest["debt"] is not None and latest["assets"] >= 1_000_000 \
                 and 0 <= latest["assets"] - latest["debt"] < 0.02 * latest["assets"]:
             thin = f"Its equity is thin: {_money(latest['assets'] - latest['debt'], currency)} against total assets of {_money(latest['assets'], currency)}"
             money.append((thin, available("assets") + available("debt")))
-            material.append((thin, available("assets") + available("debt")))
+            material.append(("Its equity is thin", available("assets") + available("debt")))
         if latest["revenue"] is None:
             unknowns.append(("revenue (not reported in the filed accounts)", available("reporting_period")))
     else:
@@ -701,6 +718,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
 
     # 4. What changed -----------------------------------------------------------------------------
     changed: list[tuple[str, Any]] = []
+    moves_to_explain: list[str] = []
     revenue_move = None
     if prev and has_accounts:
         prev_label = _period_label(prev.get("period"))
@@ -716,7 +734,20 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                     swing = (old < 0) != (new < 0) and max(abs(old), abs(new)) >= small_result
                     big = old != 0 and abs(new - old) >= 0.5 * abs(old) and min(abs(old), abs(new)) >= small_result
                     if field == "annual_result" and (swing or big) and not group_years:
-                        material.append((text[:1].upper() + text[1:], cited + available(field)))
+                        if swing:
+                            material.append((f"It swung from a {'loss' if old < 0 else 'profit'} in {prev_label} to a {'loss' if new < 0 else 'profit'} in {latest_label}", cited + available(field)))
+                        else:
+                            material.append((f"Its annual result {'more than doubled' if new >= 2 * old > 0 else 'rose sharply' if new > old else 'fell sharply'} from {prev_label}", cited + available(field)))
+                        moves_to_explain.append(f"the change in the annual result from {prev_label} to {latest_label}")
+                    if field == "revenue" and old > 0 and new > 0 and abs(new - old) >= 0.3 * old and min(old, new) >= SMALL_AMOUNT:
+                        moves_to_explain.append(f"the {'rise' if new > old else 'fall'} in revenue from {prev_label} to {latest_label}")
+                if field == "annual_result":
+                    old_op, new_op = _number(prev.get("operating_result")), latest["operating_result"]
+                    if old_op is not None and new_op is not None and old_op != 0 and abs(new_op - old_op) >= 0.5 * abs(old_op) \
+                            and max(abs(old_op), abs(new_op)) >= small_result:
+                        op_change = _change(old_op, new_op, currency, "the parent company's operating result" if group_years else "the operating result",
+                                            prev_label, latest_label, result=True, small=small_result)
+                        changed.append((op_change[:1].upper() + op_change[1:], cited + available("operating_result")))
                     if field == "revenue":
                         revenue_move = (old, new, prev_label)
             if len(history) > 1 and all(_comparable((h["value"] or {}).get("period")) for h in history):
@@ -752,14 +783,15 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                 old, new = _number(g_old.get(field)), _number(g_new.get(field))
                 if old is not None and new is not None:
                     g_small = max(SMALL_AMOUNT, 0.02 * abs(_number(g_new.get("revenue")) or 0))
-                    text = _change(old, new, currency, noun, g_old_label, g_new_label, result=field == "annual_result",
+                    text = _change(old, new, g_currency, noun, g_old_label, g_new_label, result=field == "annual_result",
                                    small=g_small if field == "annual_result" else SMALL_AMOUNT)
                     group_sentences.append((text[:1].upper() + text[1:], group_years[:2]))
                     if field == "revenue":
                         group_move = (old, new, g_old_label)
-                    elif ((old < 0) != (new < 0) and max(abs(old), abs(new)) >= g_small) or \
-                            (old != 0 and abs(new - old) >= 0.5 * abs(old) and min(abs(old), abs(new)) >= g_small):
-                        material.append((text[:1].upper() + text[1:], group_years[:2]))
+                    elif (old < 0) != (new < 0) and max(abs(old), abs(new)) >= g_small:
+                        material.append((f"The group swung from a {'loss' if old < 0 else 'profit'} in {g_old_label} to a {'loss' if new < 0 else 'profit'} in {g_new_label}", group_years[:2]))
+                    elif old != 0 and abs(new - old) >= 0.5 * abs(old) and min(abs(old), abs(new)) >= g_small:
+                        material.append((f"The group's annual result {'more than doubled' if new >= 2 * old > 0 else 'rose sharply' if new > old else 'fell sharply'} from {g_old_label}", group_years[:2]))
             changed[0:0] = group_sentences
     dated_groups: dict[str, tuple[str, str]] = {}
     for role in roles:
@@ -785,18 +817,24 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                 current = holders_of(group_code)
                 updates.append(f"the {what_group(group_code, norwegian)} on {stamp}" + (f" (now {_names(current)})" if current else ""))
             sentence = f"In the last two years the register recorded changes to {_join(updates)}"
-            others = len([g for g, v in changes_after_start.items() if recent(v[0])]) - len(recent_groups)
-            if others > 0:
-                sentence += f"; {others} other role group{'s' if others != 1 else ''} also changed"
+            shown_codes = {g for g, _ in recent_groups}
+            others = sorted(((g, v) for g, v in changes_after_start.items() if recent(v[0]) and g not in shown_codes), key=lambda kv: kv[1][0], reverse=True)
+            if others:
+                sentence += "; " + _join([f"the {what_group(g, v[1])} on {v[0]}" for g, v in others[:2]]) + " also changed"
             changed.append((sentence, available("registered_roles")))
+            if any(g in ("DAGL", "STYR") for g, _ in recent_groups):
+                unknowns.append(("who joined or left in those changes (the register lists the current holders, not the history)", available("registered_roles")))
             top_code = recent_groups[0][0]
             if top_code in ("DAGL", "STYR"):
                 material.append((f"The register recorded a change to the {what_group(top_code, recent_groups[0][1][1])} on {recent_groups[0][1][0]}", available("registered_roles")))
         else:
             group_code, (stamp, norwegian) = max(changes_after_start.items(), key=lambda kv: kv[1][0])
             changed.append((f"No registered role has changed in the last two years; the latest change was to the {what_group(group_code, norwegian)} on {stamp}", available("registered_roles")))
-    elif dated_groups and founded:
+    elif dated_groups and founded and not (run_day and _within(founded, run_day, 550)):
         changed.append((f"The registered roles have not changed since the company was registered in {founded[:4]}", available("registered_roles")))
+    if founded and run_day and _within(founded, run_day, 550):
+        changed.insert(0, (f"It is a new company, founded on {founded}" + (f"; its first accounts cover {latest_label}" if has_accounts and not prev else ""),
+                           [c for c in (*available("founded_date"), *([period_claim] if period_claim and not prev else [])) if c]))
     renamed = [f for f in former if recent(str(f.get("until") or ""))]
     if renamed:
         until = str(renamed[0].get("until") or "")[:10]
@@ -871,7 +909,16 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     online: list[tuple[str, Any]] = []
     platforms = sorted({PLATFORM_NAMES.get(str(c.get("platform") or "").lower(), str(c.get("platform") or "other")) for c in socials})
     if site:
-        online.append((f"Its website {site} was verified as this exact legal entity", available("official_website")))
+        spans = [str((evidence.get(i) or {}).get("claim_span") or "") for c in available("official_website") for i in c.get("evidence_ids") or []]
+        digits = re.compile(rf"{org[:3]}\s?\.?{org[3:6]}\s?\.?{org[6:]}") if len(org) == 9 else None
+        proof = []
+        if any(sp.startswith('"hjemmeside"') or "hjemmeside" in sp for sp in spans):
+            proof.append("it is the homepage listed in the register")
+        if digits and any(digits.search(sp) for sp in spans):
+            proof.append("the site prints the organisation number")
+        elif any(not sp.startswith('"') for sp in spans):
+            proof.append("the site names the company")
+        online.append((f"Its website is {site}" + (f" ({_join(proof)})" if proof else ""), available("official_website")))
         if socials:
             online.append((f"It links to company profiles on {_join(platforms)}", socials))
         else:
@@ -899,7 +946,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         stamp = str(top.get("posted_date") or "")[:10]
         where = "NAV's vacancy register" if top.get("platform") == "arbeidsplassen.nav.no" else "its website"
         hiring.append((f"{len(postings)} job posting{'s were' if len(postings) != 1 else ' was'} found, most recently {_quote(top.get('title') or top.get('value'), 100)}" + (f" (posted {stamp})" if stamp else "") + f" on {where}", dated[:3]))
-    employing = (employees or 0) > 0 or bool(site)
+    employing = (employees or 0) > 0 or bool(site) or (latest["revenue"] or 0) >= 1_000_000
     if not signals and employing and form not in HOUSING_FORMS:
         found = ("no careers page or job posting was found on the checked pages of its website or in NAV's vacancy register" if site
                  else "NAV's vacancy register lists no posting for it, and it has no verified website to check")
@@ -920,14 +967,19 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         if others:
             headlines = "; ".join(f"{_quote(c.get('title') or c.get('value'), 90)} ({str(c.get('published_at'))[:10]})" for c in others)
             activity_sentences.append((f"Other items include {headlines}", others))
-        if not real_news:
-            activity_sentences.append(("They are website template or test posts, not news", news[:1]))
+    elif site and junk_news:
+        unknowns.append(("dated news (its website shows only template or test posts, or pages stamped with the current date)", junk_news[:1]))
     elif site:
         unknowns.append(("dated news (none found on the checked pages of its website)", [first("dated_news")] if first("dated_news") else None))
     section("activity_log", "Recent activity", activity_sentences)
 
-    if activity_gloss and "owning shares" in activity_gloss:
-        unknowns.append(("which companies it owns shares in (shareholdings are not among the sources checked)", available("registered_activity")))
+    if activity_gloss and "owning shares" in activity_gloss and (latest["assets"] or 0) >= 100_000:
+        unknowns.append(("whether and in which companies it holds shares (shareholdings are not among the sources checked)", available("registered_activity")))
+    loss_cause = has_accounts and (latest["annual_result"] or 0) < -100_000
+    if loss_cause:
+        moves_to_explain = [m for m in moves_to_explain if "annual result" not in m]
+    if moves_to_explain:
+        unknowns.append((f"what drove {_join(moves_to_explain[:2])} (the accounts give the figures, not the reasons)", available("annual_result") + available("revenue")))
     if has_accounts and (latest["annual_result"] or 0) < -100_000:
         unknowns.append((f"what caused the loss of {_money(abs(latest['annual_result']), currency)} in {latest_label} (the accounts give the figures, not the reasons)", available("annual_result")))
     if form in OWNED_FORMS:
@@ -996,12 +1048,11 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         presence.append(f"{len(postings)} job posting{'s' if len(postings) != 1 else ''}")
         presence_claims += postings[:1]
     if real_news:
-        presence.append(f"{len(news)}{'+' if len(news) >= MAX_NEWS else ''} dated news item{'s' if len(news) != 1 else ''} (latest {str(real_news[0].get('published_at'))[:10]})")
+        presence.append(f"{len(news)}{'+' if len(news) >= MAX_NEWS else ''} dated news item{'s' if len(news) != 1 else ''} (latest {str(news[0].get('published_at'))[:10]})")
         presence_claims += real_news[:1]
     if presence and not (material and presence == ["a verified website"]):
         brief.append((f"It has {_join(presence)}", presence_claims))
-    elif not material and form not in HOUSING_FORMS:
-        brief.append(("No website could be verified for it", [first("official_website")] if first("official_website") else None))
+
     built = build("brief", "In brief", brief)
     if built:
         sections.insert(0, built)

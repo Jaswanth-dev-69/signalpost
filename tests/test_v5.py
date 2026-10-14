@@ -259,8 +259,8 @@ class SummaryRules(unittest.TestCase):
     def test_template_posts_stay_claims_but_not_news(self):
         post = {"field": "dated_news", "value": "Hello world! (2021-07-28)", "title": "Hello world!", "published_at": "2021-07-28", "url": "https://www.example.no/hello-world"}
         text = envelope_summary(self.env_with(post))["text"]
-        self.assertNotIn("The latest dated item on its website is “Hello world!”", text)
-        self.assertIn("They are website template or test posts, not news", text)
+        self.assertNotIn("Hello world!”", text.split("Sources:")[0].replace("only template or test posts", ""))
+        self.assertIn("its website shows only template or test posts", text)
 
     def test_careers_page_is_not_said_to_list_openings(self):
         page = {"field": "hiring_signal", "value": "https://www.example.no/jobb", "kind": "careers_page", "openings_listed": True}

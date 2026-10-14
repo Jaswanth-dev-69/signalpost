@@ -147,6 +147,9 @@ must start to match.
 | H14 | Website URL normalisation (ports, deep paths) | 1/150 final URLs carries a port, 10 deep paths (kept: they are the verified addresses) | XS | no change |
 | H15 | Social URL normalisation | 1/125 odd form (`facebook.com/pages/...`) | XS | no change |
 | H16 | Per-company web budget spent on 404 careers probes before news upgrades | 4 companies in proxy-200 left 34 items feed-cited because the budget ran out | M | open (runtime trade-off) |
+| H17 | Identity proof on unread legal/contact pages for websites held back as ambiguous | 77 held-back sites (500 + 100 companies), 16 typical pages each (privacy, terms, contact, about): organisation number found on **0** | S | **rejected** (the gate is not missing existing proof; the sites are managers', franchises' or groups') |
+| H18 | Social profiles declared only in a page's JSON configuration (`"facebookLink":"…"`), read by key and quoted as printed, same identity check | 61 verified sites without a published profile: 10 contain profile URLs, of which ~2 are the company's own and invisible to the anchor-based extractor (the rest are platform links or fail the identity check, correctly) | XS | build |
+| H19 | Retry registered homepages that failed with transient errors | 14 failures; 2 load now, both unusable (empty document, text/plain) | S | **rejected** |
 
 ### v5b measurement (WS-B code as of 14 Oct 19:40; live, same day)
 

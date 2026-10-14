@@ -133,7 +133,22 @@ def _social_links_raw(base_url: str, soup: BeautifulSoup) -> list[dict[str, str]
         if CREDIT_CONTEXT.search(context) or CREDIT_CONTEXT.search(node.get_text(" ", strip=True)):
             continue
         found.setdefault((normalized["platform"], normalized["url"]), {**normalized, "href": candidate[:300]})
+    # Sites built on page builders often declare their profiles only in a JSON configuration that a
+    # script turns into icons ("facebookLink":"https://www.facebook.com/<handle>"). Such a link is read
+    # with the key that names it and quoted exactly as printed; the same identity check applies.
+    for script in soup.find_all("script"):
+        text = script.string or ""
+        if "http" not in text or (script.get("type") or "").lower() == "application/ld+json":
+            continue
+        for match in SCRIPT_SOCIAL_LINK.finditer(text):
+            raw = match.group(2)
+            normalized = normalize_social_url(raw.replace("\\/", "/"))
+            if normalized:
+                found.setdefault((normalized["platform"], normalized["url"]), {**normalized, "href": raw[:300]})
     return sorted(found.values(), key=lambda item: (item["platform"], item["url"]))
+
+
+SCRIPT_SOCIAL_LINK = re.compile(r'"([A-Za-z_]*(?:facebook|instagram|linkedin|youtube|twitter|tiktok)[A-Za-z_]*)"\s*:\s*"(https?:(?:\\?/){2}[^"\s]{3,200})"', re.I)
 
 
 def _social_links(base_url: str, soup: BeautifulSoup) -> list[dict[str, str]]:

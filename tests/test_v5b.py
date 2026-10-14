@@ -129,3 +129,14 @@ class NewsShape(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeclaredSocialLinks(unittest.TestCase):
+    def test_profiles_declared_in_page_configuration_are_read_verbatim(self):
+        from norway_company_agent.website import _social_links_raw
+        html = ('<html><body><script>window.cfg={"footer":{"facebookLink":"https://www.facebook.com/grenlandutleie",'
+                '"instagramUrl":"https:\\/\\/www.instagram.com\\/grenlandutleie\\/"}}; var sdk="https://facebook.com/2008";</script></body></html>')
+        items = _social_links_raw("https://grenlandutleie.no/", BeautifulSoup(html, "lxml"))
+        self.assertEqual([i["url"] for i in items], ["https://facebook.com/grenlandutleie", "https://instagram.com/grenlandutleie"])
+        for item in items:
+            self.assertIn(item["href"], html)
