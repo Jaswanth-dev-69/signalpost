@@ -509,6 +509,14 @@ def profile_to_contract_envelope(
             claim = add_claim("financial_history", {"account_type": earlier.get("account_type"), "currency": earlier.get("currency"),
                                                     "period": earlier_period, **figures}, "available", 1.0, ids)
             claim["reporting_period"] = earlier_period
+        # The figures above are the company's own accounts (SELSKAP); say when the register also holds
+        # group (KONSERN) accounts, so a parent's own figures are not read as the group's.
+        group_periods = (fin_rec.get("value") or {}).get("group_periods") or []
+        if group_periods:
+            ev = evidence_from(fin_rec, "KONSERN", "financials_group_accounts", "official_annual_accounts")
+            if ev:
+                evidence_map[ev]["effective_at"] = group_periods[0]
+            add_claim("group_accounts", group_periods, "available", 1.0, [ev])
 
     # 6c. The kit's own readers find company-site news among the website record's bounded `pages`
     # (news-path pages). Our news is read from listings, feeds and articles fetched separately, so

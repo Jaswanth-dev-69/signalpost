@@ -84,6 +84,8 @@ def normalize_financials(body: Any) -> dict[str, Any]:
         reverse=True,
     )
     normalized = []
+    group_periods = sorted({str(_get(item, "regnskapsperiode", "tilDato")) for item in records
+                            if item.get("regnskapstype") == "KONSERN" and _get(item, "regnskapsperiode", "tilDato")}, reverse=True)
     for item in records[:3]:
         normalized.append({
             "record_id": item.get("id"),
@@ -98,7 +100,7 @@ def normalize_financials(body: Any) -> dict[str, Any]:
             "equity": _get(item, "egenkapitalGjeld", "egenkapital", "sumEgenkapital"),
             "debt": _get(item, "egenkapitalGjeld", "gjeldOversikt", "sumGjeld"),
         })
-    return {"records": normalized}
+    return {"records": normalized, "group_periods": group_periods} if group_periods else {"records": normalized}
 
 
 def normalize_financial_history(body: Any, org: str) -> dict[str, Any]:

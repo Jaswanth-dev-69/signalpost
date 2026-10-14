@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SUMMARY_FIELD = "summary_profile"
 # Claim fields added on purpose since pre-v5 (v5: what the register says the company does, its former
 # names and the earlier years of the accounts response the agent already fetches).
-ADDED_FIELDS = {"registered_activity", "former_names", "financial_history"}
+ADDED_FIELDS = {"registered_activity", "former_names", "financial_history", "group_accounts"}
 SUMMARY_KEYS = {"summary"}
 T = "2026-10-14T00:00:00Z"
 

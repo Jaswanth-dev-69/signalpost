@@ -84,7 +84,13 @@ class RegisterAdditions(unittest.TestCase):
     def test_additions_come_after_every_earlier_claim(self):
         fields = [c["field"] for c in self.env["claims"]]
         first_added = min(fields.index(f) for f in ("registered_activity", "former_names", "financial_history"))
-        self.assertTrue(all(f in ("registered_activity", "former_names", "financial_history", "summary_profile") for f in fields[first_added:]))
+        self.assertTrue(all(f in ("registered_activity", "former_names", "financial_history", "group_accounts", "summary_profile") for f in fields[first_added:]))
+
+    def test_group_accounts_are_flagged_with_a_verbatim_span(self):
+        claim = available(self.env, "group_accounts")[0]
+        self.assertEqual(claim["value"], ["2025-12-31"])
+        self.assertEqual(self.evidence[claim["evidence_ids"][0]]["claim_span"], "KONSERN")
+        self.assertIn("KONSERN", RAW_ACCOUNTS)
 
 
 class Summary(unittest.TestCase):
@@ -106,6 +112,8 @@ class Summary(unittest.TestCase):
         self.assertIn("previously registered under the name TESTSELSKAP NORD AS (until 2022-11-09)", text)
         self.assertIn("Not known or not established:", text)
         self.assertIn("first Signalpost snapshot", text)
+        self.assertIn("the register also holds group (konsern) accounts for 2025", text)
+        self.assertTrue(text.startswith("In brief: TESTSELSKAP NORD ASA is a public limited company (ASA)"))
         self.assertRegex(text, r"\[\d+\]")
         for source in self.claim["sources"]:
             self.assertTrue(source["evidence_ids"])

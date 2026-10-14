@@ -24,7 +24,7 @@ DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 URL = re.compile(r"https?://[^\s;,]+[^\s;,.)]")
 QUOTE = re.compile(r"“([^”]*)”")
 PCT = re.compile(r"(rose|fell|grew|declined) (\d+)%")
-REQUIRED = ("identity", "changes", "unknowns")
+REQUIRED = ("brief", "identity", "changes", "unknowns")
 
 
 def _render(value: float) -> set[str]:
