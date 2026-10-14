@@ -132,6 +132,15 @@ class Summary(unittest.TestCase):
         env["changes"] = []
         self.assertIn("No material change was found compared with the previous run on 2026-10-13", envelope_summary(env)["text"])
 
+    def test_refresh_changes_are_named_with_examples(self):
+        env = envelope(profile())
+        env["refresh"] = {"previous_run_id": "run-1", "previous_completed_at": "2026-10-13T06:00:00Z", "material_changes": 1}
+        env["changes"] = [{"field": "claims.dated_news", "change_type": "added", "old_value": None, "new_value": "Ny avtale (2026-10-12)",
+                           "source_url": "https://www.example.no/nyheter/ny-avtale"}]
+        apply_envelope_summary(env)
+        self.assertIn("1 material change was found (dated news), for example added dated news “Ny avtale (2026-10-12)”", env["summary"]["text"])
+        self.assertEqual(validate_synthesis_envelope(env), [])
+
     def test_a_summary_error_never_costs_the_envelope(self):
         env = envelope(profile())
         env["claims"].append({"field": "registered_roles", "value": 5, "availability": "available", "evidence_ids": []})

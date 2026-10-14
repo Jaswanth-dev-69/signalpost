@@ -94,6 +94,8 @@ def validate_synthesis_envelope(env: dict[str, Any]) -> list[str]:
                     pass
     refresh = env.get("refresh") or {}
     values.append(str(refresh.get("previous_completed_at") or ""))
+    for change in env.get("changes") or []:  # refresh events carry their own source URLs
+        values.extend(_strings({k: change.get(k) for k in ("old_value", "new_value", "effective_at", "source_url")}))
     blob = "\n".join(values)
 
     for date in DATE.findall(body):

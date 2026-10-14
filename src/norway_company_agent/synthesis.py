@@ -172,6 +172,13 @@ SOURCE_LABELS = {
 PLATFORM_NAMES = {"facebook": "Facebook", "instagram": "Instagram", "linkedin": "LinkedIn", "youtube": "YouTube",
                   "x": "X (Twitter)", "twitter": "X (Twitter)", "tiktok": "TikTok", "pinterest": "Pinterest",
                   "vimeo": "Vimeo", "github": "GitHub", "snapchat": "Snapchat", "threads": "Threads"}
+CHANGE_NAMES = {"registry.name": "legal name", "registry.legal_form": "legal form", "registry.employees": "employee count",
+                "registry.municipality": "municipality", "registry.website": "registered homepage",
+                "registry.latest_submitted_accounts": "latest filed accounts year", "financials.records": "annual accounts",
+                "financial_history.years": "filed accounts years", "roles.roles": "registered roles", "locations.locations": "sub-units",
+                "website.title": "website title", "website.description": "website description", "website.social_links": "website social links",
+                "claims.official_website": "official website", "claims.social_profile": "social profiles", "claims.dated_news": "dated news",
+                "claims.hiring_signal": "hiring signals", "claims.company_description": "website description"}
 MAX_QUOTE = 240
 SUMMARY_FIELD = "summary_profile"
 
@@ -459,8 +466,15 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         when = str(refresh.get("previous_completed_at") or "")[:10]
         since = f"the previous run{' on ' + when if when else ''}"
         if changes:
-            fields = sorted({str(c.get("field") or "").replace("claims.", "").replace("_", " ") for c in changes})
-            changed.append((f"Compared with {since}, {len(changes)} material change{'s' if len(changes) != 1 else ''} were found ({_join(fields[:5])}); each is listed with its source under changes", None))
+            fields = sorted({CHANGE_NAMES.get(str(c.get("field")), str(c.get("field") or "").replace("claims.", "").replace("_", " ")) for c in changes})
+            examples = []
+            for change in changes:
+                kind = change.get("change_type") or ("removed" if change.get("new_value") is None else "added" if change.get("old_value") is None else "changed")
+                shown = change.get("new_value") if change.get("new_value") is not None else change.get("old_value")
+                if isinstance(shown, str) and len(examples) < 3:
+                    examples.append(f"{kind} {CHANGE_NAMES.get(str(change.get('field')), 'item')} {_quote(shown, 80)}")
+            changed.append((f"Compared with {since}, {len(changes)} material change{'s were' if len(changes) != 1 else ' was'} found ({_join(fields[:6])})"
+                            + (f", for example {_join(examples)}" if examples else "") + "; each is listed with its source under changes", None))
         else:
             changed.append((f"No material change was found compared with {since}", None))
     else:
