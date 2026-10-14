@@ -54,7 +54,40 @@ Sets: `sample-100` (Builderr public sample), `proxy-200` (seed 20261004), `set-3
 - `eval/synthesis_validator.py`: every date, amount, employee count, URL and quote in a summary must
   match an available claim; markers must resolve to sources whose evidence ids exist.
 
-### Checks so far (offline, saved profiles of 14 Oct runs)
+### Push gate for WS-A (code `7974893`; live runs `v5a` of 14 Oct, same code apart from the summary's evidence-id list)
+
+| Check | Result |
+|---|---|
+| Unit tests | 171 pass (157 + 14 new) |
+| Schema validator | 0 errors on sample-100, proxy-200, set-300 |
+| Claim audit | 0 issues (all three sets) |
+| Summary traceability (`eval/synthesis_validator.py`) | 100/100, 200/200, 300/300 |
+| Regression guard on live profiles (`--new 7974893 --base pre-v5`) | clean on 600 companies; additions only: `registered_activity` 599, `financial_history` 1,094, `former_names` 200 |
+| precision_audit (100 claims, sample-100) | 99/100 supported, **0 wrong-company**, 17/17 web spans on the page (the 1: homepage that does not print its own URL, as in v4) |
+| evidence_audit (100 claims, 163 items) | 99.4% spans verbatim (1 dated-news time string no longer on a live blog page) |
+| Span census of the new evidence (live re-fetch) | `registered_activity` 100/100, `former_names` 90/90, `financial_history` 1,123/1,123 (raw, node, visible); accounts spans 4,089/4,089 also under a browser-style Accept (XML). Only failures: frozen bulk-snapshot rows compared with today's dump (pre-existing) |
+| Red team | 0/35 false positives |
+| Determinism pair (proxy-200 twice into one file) | 0 duplicates, 0 change events, refresh 200 compared / 0 material; non-summary claims identical for 200/200; the second run's summaries say "No material change was found compared with the previous run on 2026-10-14" |
+| Viewer, headless Chrome | 0 errors; ready 0.24 s (100) and 0.61 s (1,500 replicated, 20.6 MB); compare, deep link, mobile list → profile → back, no page-level horizontal scroll |
+| Runtime, 1,500 projection (summed latency scaled from v3's measured 990 s) | v5a 1,154 s (proxy-200), 1,171 s (set-300), 1,198 s (sample-100); main 1,135 / 1,141 / 1,210 s. Below the 1,300 s reject line |
+
+Coverage of external families is unchanged by WS-A (same profiles give the same claims; between two
+live runs an hour apart the families move by ±2 companies per 300, which is the crawl noise floor).
+
+| Run (companies / facts) | website | social | news | hiring |
+|---|---|---|---|---|
+| v2 sample-100 | 72/72 | 42/104 | 34/217 | 3/4 |
+| v3 sample-100 | 63/63 | 33/72 | 30/206 | 15/19 |
+| main sample-100 | 71/71 | 40/84 | 35/391 | 20/24 |
+| v5a sample-100 | 71/71 | 40/84 | 35/391 | 20/24 |
+| v2 proxy-200 | 53/53 | 31/79 | 28/193 | 3/5 |
+| main proxy-200 | 44/44 | 21/41 | 22/276 | 16/17 |
+| v5a proxy-200 | 44/44 | 21/41 | 21/256 | 16/17 |
+| v2 set-300 | 100/100 | 60/120 | 33/208 | 6/27 |
+| main set-300 | 85/85 | 47/90 | 29/310 | 17/43 |
+| v5a set-300 | 83/83 | 45/86 | 29/310 | 15/41 |
+
+### Checks during development (offline, saved profiles of 14 Oct runs)
 
 | Check | Result |
 |---|---|
