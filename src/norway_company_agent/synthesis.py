@@ -706,7 +706,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         cited = [history[0]] + ([period_claim] if period_claim else [])
         whose = "In its own (parent-company) accounts, revenue" if parent_only else "Revenue"
         if comparable:
-            for field, noun in (("revenue", whose), ("annual_result", f"the {result_noun}")):
+            for field, noun in (("revenue", whose), ("annual_result", f"the parent company's {result_noun}" if group_years else f"the {result_noun}")):
                 old, new = _number(prev.get(field)), latest[field]
                 if old is not None and new is not None:
                     text = _change(old, new, currency, noun, prev_label, latest_label, result=field == "annual_result",
@@ -714,7 +714,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                     changed.append((text[:1].upper() + text[1:], cited + available(field)))
                     swing = (old < 0) != (new < 0) and max(abs(old), abs(new)) >= small_result
                     big = old != 0 and abs(new - old) >= 0.5 * abs(old) and min(abs(old), abs(new)) >= small_result
-                    if field == "annual_result" and (swing or big):
+                    if field == "annual_result" and (swing or big) and not group_years:
                         material.append((text[:1].upper() + text[1:], cited + available(field)))
                     if field == "revenue":
                         revenue_move = (old, new, prev_label)
@@ -746,14 +746,20 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         g_new, g_old = group_years[0]["value"], group_years[1]["value"]
         if _comparable(g_new.get("period")) and _comparable(g_old.get("period")):
             g_new_label, g_old_label = _period_label(g_new.get("period")), _period_label(g_old.get("period"))
+            group_sentences = []
             for field, noun in (("revenue", "Group revenue"), ("annual_result", "the group's annual result")):
                 old, new = _number(g_old.get(field)), _number(g_new.get(field))
                 if old is not None and new is not None:
+                    g_small = max(SMALL_AMOUNT, 0.02 * abs(_number(g_new.get("revenue")) or 0))
                     text = _change(old, new, currency, noun, g_old_label, g_new_label, result=field == "annual_result",
-                                   small=max(SMALL_AMOUNT, 0.02 * abs(_number(g_new.get("revenue")) or 0)) if field == "annual_result" else SMALL_AMOUNT)
-                    changed.insert(0, (text[:1].upper() + text[1:], group_years[:2]))
+                                   small=g_small if field == "annual_result" else SMALL_AMOUNT)
+                    group_sentences.append((text[:1].upper() + text[1:], group_years[:2]))
                     if field == "revenue":
                         group_move = (old, new, g_old_label)
+                    elif ((old < 0) != (new < 0) and max(abs(old), abs(new)) >= g_small) or \
+                            (old != 0 and abs(new - old) >= 0.5 * abs(old) and min(abs(old), abs(new)) >= g_small):
+                        material.append((text[:1].upper() + text[1:], group_years[:2]))
+            changed[0:0] = group_sentences
     dated_groups: dict[str, tuple[str, str]] = {}
     for role in roles:
         stamp = str(role.get("last_changed") or "")[:10]
