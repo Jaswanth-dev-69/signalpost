@@ -84,7 +84,14 @@ class RegisterAdditions(unittest.TestCase):
     def test_additions_come_after_every_earlier_claim(self):
         fields = [c["field"] for c in self.env["claims"]]
         first_added = min(fields.index(f) for f in ("registered_activity", "former_names", "financial_history"))
-        self.assertTrue(all(f in ("registered_activity", "former_names", "financial_history", "group_accounts", "summary_profile") for f in fields[first_added:]))
+        self.assertTrue(all(f in ("registered_activity", "former_names", "financial_history", "group_accounts", "group_financials", "summary_profile") for f in fields[first_added:]))
+
+    def test_group_figures_are_published_with_every_figure_cited(self):
+        claims = available(self.env, "group_financials")
+        self.assertEqual([c["reporting_period"]["tilDato"] for c in claims], ["2025-12-31"])
+        self.assertEqual(claims[0]["value"]["revenue"], 9000000.0)
+        for i in claims[0]["evidence_ids"]:
+            self.assertIn(self.evidence[i]["claim_span"], RAW_ACCOUNTS)
 
     def test_group_accounts_are_flagged_with_a_verbatim_span(self):
         claim = available(self.env, "group_accounts")[0]
@@ -109,10 +116,10 @@ class Summary(unittest.TestCase):
         text = self.claim["value"]
         self.assertIn("“Utvikling og salg av ladeutstyr for elbiler og tilhørende tjenester.”", text)
         self.assertIn("In its own (parent-company) accounts, revenue rose 25% from NOK 1.2 million in 2024 to NOK 1.5 million in 2025", text)
-        self.assertIn("It was formerly registered as TESTSELSKAP NORD AS (until 2022-11-09)", text)
+        self.assertIn("Earlier names in the register: TESTSELSKAP NORD AS (until 2022-11-09)", text)
         self.assertIn("Not known or not established:", text)
         self.assertNotIn("Signalpost snapshot", text)
-        self.assertIn("The register also holds group (konsern) accounts for 2025", text)
+        self.assertIn("The group (konsern) accounts for 2025 report revenue of NOK 9.0 million", text)
         self.assertTrue(text.startswith("In brief: TESTSELSKAP NORD ASA is a public limited company (ASA)"))
         self.assertRegex(text, r"\[\d+\]")
         for source in self.claim["sources"]:
@@ -122,7 +129,7 @@ class Summary(unittest.TestCase):
         env = envelope(profile())
         env["claims"] = [c for c in env["claims"] if c["field"] != "financial_history" or c["reporting_period"]["tilDato"] == "2023-12-31"]
         text = envelope_summary(env)["text"]
-        self.assertIn("turned from a loss to a profit", text)
+        self.assertIn("turned from a loss of NOK 50 thousand in 2023 to a profit of NOK 90 thousand in 2025", text)
 
     def test_unknowns_name_what_is_missing(self):
         p = profile()
@@ -180,6 +187,21 @@ class Viewer(unittest.TestCase):
         self.assertTrue(record["sm"]["s"])
 
 
+class ViewerScript(unittest.TestCase):
+    @unittest.skipUnless(__import__("shutil").which("node"), "node is not installed")
+    def test_viewer_script_parses(self):
+        import subprocess
+        import tempfile
+        env = envelope(profile())
+        apply_envelope_summary(env)
+        html = build_viewer_html([env], {"run_id": "test"})
+        script = html[html.rindex("<script>") + len("<script>"):html.rindex("</script>")]
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as handle:
+            handle.write(script)
+        result = subprocess.run(["node", "--check", handle.name], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr[:500])
+
+
 class RegressionGuard(unittest.TestCase):
     def test_guard_flags_a_changed_claim_and_allows_the_summary(self):
         base = envelope(profile())
@@ -229,7 +251,7 @@ class SummaryRules(unittest.TestCase):
             if claim["field"] == "financial_history" and claim["reporting_period"]["tilDato"] == "2024-12-31":
                 claim["value"]["period"] = {"fraDato": "2024-11-02", "tilDato": "2024-12-31"}
         text = envelope_summary(env)["text"]
-        self.assertIn("do not both cover twelve months (the 2-month period 2024-11-02 to 2024-12-31 and 2025)", text)
+        self.assertIn("The latest accounts (2025) and the previous ones (the 2-month period 2024-11-02 to 2024-12-31) cover periods of different length, so they are not compared", text)
         self.assertNotIn("rose 25%", text)
 
     def test_template_posts_stay_claims_but_not_news(self):

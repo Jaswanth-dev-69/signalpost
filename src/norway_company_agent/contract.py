@@ -517,6 +517,28 @@ def profile_to_contract_envelope(
             if ev:
                 evidence_map[ev]["effective_at"] = group_periods[0]
             add_claim("group_accounts", group_periods, "available", 1.0, [ev])
+        # The group's own figures from the same response, one claim per group year, each figure
+        # quoted as a value literal (verbatim in the JSON and the XML representation).
+        for group_record in ((fin_rec.get("value") or {}).get("group_records") or [])[:3]:
+            group_period = group_record.get("period")
+            if not isinstance(group_period, dict) or not group_period.get("tilDato"):
+                continue
+            end = str(group_period["tilDato"])
+            ids = [evidence_from(fin_rec, end, f"financials_group_{end}_period", "official_annual_accounts")]
+            figures = {}
+            for field, key, _label in FINANCIAL_FIELDS:
+                figure = group_record.get(key)
+                if isinstance(figure, (int, float)):
+                    figures[field] = figure
+                    ids.append(evidence_from(fin_rec, f"{figure:.2f}", f"financials_group_{end}_{field}", "official_annual_accounts"))
+            if not figures:
+                continue
+            for item in ids:
+                if item:
+                    evidence_map[item]["effective_at"] = end
+            claim = add_claim("group_financials", {"account_type": "KONSERN", "currency": group_record.get("currency"),
+                                                   "period": group_period, **figures}, "available", 1.0, ids)
+            claim["reporting_period"] = group_period
 
     # 6c. The kit's own readers find company-site news among the website record's bounded `pages`
     # (news-path pages). Our news is read from listings, feeds and articles fetched separately, so

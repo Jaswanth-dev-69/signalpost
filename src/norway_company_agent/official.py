@@ -83,24 +83,32 @@ def normalize_financials(body: Any) -> dict[str, Any]:
         key=lambda item: (item.get("regnskapstype") != "KONSERN", str(_get(item, "regnskapsperiode", "tilDato") or "")),
         reverse=True,
     )
-    normalized = []
     group_periods = sorted({str(_get(item, "regnskapsperiode", "tilDato")) for item in records
                             if item.get("regnskapstype") == "KONSERN" and _get(item, "regnskapsperiode", "tilDato")}, reverse=True)
-    for item in records[:3]:
-        normalized.append({
-            "record_id": item.get("id"),
-            "account_type": item.get("regnskapstype"),
-            "period": item.get("regnskapsperiode"),
-            "currency": item.get("valuta"),
-            "revenue": _get(item, "resultatregnskapResultat", "driftsresultat", "driftsinntekter", "sumDriftsinntekter"),
-            "operating_result": _get(item, "resultatregnskapResultat", "driftsresultat", "driftsresultat"),
-            "profit_before_tax": _get(item, "resultatregnskapResultat", "ordinaertResultatFoerSkattekostnad"),
-            "annual_result": _get(item, "resultatregnskapResultat", "aarsresultat"),
-            "assets": _get(item, "eiendeler", "sumEiendeler"),
-            "equity": _get(item, "egenkapitalGjeld", "egenkapital", "sumEgenkapital"),
-            "debt": _get(item, "egenkapitalGjeld", "gjeldOversikt", "sumGjeld"),
-        })
-    return {"records": normalized, "group_periods": group_periods} if group_periods else {"records": normalized}
+    group = sorted((item for item in records if item.get("regnskapstype") == "KONSERN"),
+                   key=lambda item: str(_get(item, "regnskapsperiode", "tilDato") or ""), reverse=True)[:3]
+    normalized = [_normalized_record(item) for item in records[:3]]
+    result: dict[str, Any] = {"records": normalized}
+    if group_periods:
+        result["group_periods"] = group_periods
+        result["group_records"] = [_normalized_record(item) for item in group]
+    return result
+
+
+def _normalized_record(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_id": item.get("id"),
+        "account_type": item.get("regnskapstype"),
+        "period": item.get("regnskapsperiode"),
+        "currency": item.get("valuta"),
+        "revenue": _get(item, "resultatregnskapResultat", "driftsresultat", "driftsinntekter", "sumDriftsinntekter"),
+        "operating_result": _get(item, "resultatregnskapResultat", "driftsresultat", "driftsresultat"),
+        "profit_before_tax": _get(item, "resultatregnskapResultat", "ordinaertResultatFoerSkattekostnad"),
+        "annual_result": _get(item, "resultatregnskapResultat", "aarsresultat"),
+        "assets": _get(item, "eiendeler", "sumEiendeler"),
+        "equity": _get(item, "egenkapitalGjeld", "egenkapital", "sumEgenkapital"),
+        "debt": _get(item, "egenkapitalGjeld", "gjeldOversikt", "sumGjeld"),
+    }
 
 
 def normalize_financial_history(body: Any, org: str) -> dict[str, Any]:

@@ -87,7 +87,7 @@ def validate_synthesis_envelope(env: dict[str, Any]) -> list[str]:
     for c in available:
         values.extend(_strings(c.get("value")))
         values.extend(_strings({k: v for k, v in c.items() if k not in ("value", "evidence_ids", "field", "availability", "confidence")}))
-        figures = c.get("value") if c.get("field") == "financial_history" else {c.get("field"): c.get("value")}
+        figures = c.get("value") if c.get("field") in ("financial_history", "group_financials") else {c.get("field"): c.get("value")}
         for field, figure in (figures or {}).items() if isinstance(figures, dict) else []:
             if field in ("revenue", "operating_result", "annual_result", "assets", "debt", "registry_employees"):
                 try:
@@ -103,7 +103,19 @@ def validate_synthesis_envelope(env: dict[str, Any]) -> list[str]:
     for date in DATE.findall(body):
         if date not in blob:
             errors.append(f"{org}: date {date} is not in any published claim")
-    rendered = {r for n in numbers for r in _render(n)}
+    derived = list(numbers)
+    by_field = {}
+    for c in available:
+        if c.get("field") in ("assets", "debt", "operating_result", "annual_result"):
+            try:
+                by_field.setdefault(c.get("field"), float(c.get("value")))
+            except (TypeError, ValueError):
+                pass
+    if "assets" in by_field and "debt" in by_field:
+        derived.append(by_field["assets"] - by_field["debt"])
+    if "operating_result" in by_field and "annual_result" in by_field:
+        derived.append(by_field["annual_result"] - by_field["operating_result"])
+    rendered = {r for n in derived for r in _render(n)} | {r for n in derived for r in _render(abs(n))}
     for amount, unit in MONEY.findall(body):
         shown = f"{amount} {unit}".strip()
         if shown not in rendered:
