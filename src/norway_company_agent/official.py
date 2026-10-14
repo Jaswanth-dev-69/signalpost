@@ -182,6 +182,9 @@ def normalize_entity(body: Any) -> dict[str, Any]:
         "email": body.get("epostadresse"),
         "deleted_date": body.get("slettedato"),
         "parent_organisation_number": body.get("overordnetEnhet"),
+        "activity": body.get("aktivitet"),
+        "statutory_purpose": body.get("vedtektsfestetFormaal"),
+        "former_names": body.get("historiskeNavn"),
     }
 
 

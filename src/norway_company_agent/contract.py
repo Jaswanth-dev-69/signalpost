@@ -468,6 +468,48 @@ def profile_to_contract_envelope(
     # 6. Company-owned web layer
     _web_claims(profile, records, add_evidence, add_claim, registry_evidence if registry_ok else None, entity_ev, deadline_hit)
 
+    # 6b. What the register says the company does, its earlier names and the earlier years of the
+    # accounts response (the register lists the latest three). Same fetched records as above, so no
+    # extra requests; emitted after every other claim so the evidence ids above do not move.
+    live_value = live.get("value") or {} if live_ok else {}
+    activity_key = "aktivitet" if live_value.get("activity") else "vedtektsfestetFormaal" if live_value.get("statutory_purpose") else None
+    activity_lines = [str(line) for line in (live_value.get("activity") or live_value.get("statutory_purpose") or []) if str(line).strip()]
+    if live_ok and activity_key and activity_lines:
+        ev = evidence_from(live, f'"{activity_key}":[{json.dumps(activity_lines[0], ensure_ascii=False)}', "registry_activity", "official_registry_live")
+        add_claim("registered_activity", " ".join(" ".join(activity_lines).split()), "available", 1.0, [ev])
+    else:
+        add_claim("registered_activity", None, "not_available" if live_ok else fetch_state(live or None), 0.9, [entity_ev])
+    former = sorted((item for item in live_value.get("former_names") or [] if isinstance(item, dict) and item.get("navn")),
+                    key=lambda item: str(item.get("tilDato") or ""), reverse=True)
+    if live_ok and former:
+        ids = [evidence_from(live, json.dumps(item, ensure_ascii=False, separators=(",", ":")), f"registry_former_name_{item.get('tilDato')}", "official_registry_live") for item in former[:5]]
+        add_claim("former_names", [{"name": item.get("navn"), "from": item.get("fraDato"), "until": item.get("tilDato")} for item in former[:5]], "available", 1.0, ids)
+    else:
+        add_claim("former_names", None, "not_available" if live_ok else fetch_state(live or None), 0.9, [entity_ev])
+    if fin_status == "available" and fin_records:
+        latest = fin_records[0]
+        for earlier in fin_records[1:]:
+            earlier_period = earlier.get("period")
+            if (earlier.get("account_type") != latest.get("account_type") or not isinstance(earlier_period, dict)
+                    or not earlier_period.get("tilDato") or earlier_period == latest.get("period")):
+                continue
+            end = str(earlier_period["tilDato"])
+            ids = [evidence_from(fin_rec, end, f"financials_history_{end}_period", "official_annual_accounts")]
+            figures = {}
+            for field, key, _label in FINANCIAL_FIELDS:
+                figure = earlier.get(key)
+                if isinstance(figure, (int, float)):
+                    figures[field] = figure
+                    ids.append(evidence_from(fin_rec, f"{figure:.2f}", f"financials_history_{end}_{field}", "official_annual_accounts"))
+            if not figures:
+                continue
+            for item in ids:
+                if item:
+                    evidence_map[item]["effective_at"] = end
+            claim = add_claim("financial_history", {"account_type": earlier.get("account_type"), "currency": earlier.get("currency"),
+                                                    "period": earlier_period, **figures}, "available", 1.0, ids)
+            claim["reporting_period"] = earlier_period
+
     # 7. Summary profile (synthesis)
     summary_text = profile.get("synthesis_summary")
     if summary_text:

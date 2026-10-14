@@ -44,7 +44,8 @@ from norway_company_agent.synthesis import generate_company_synthesis  # noqa: E
 from norway_company_agent.website import fetch_website, strip_private_fields  # noqa: E402
 from norway_company_agent.webclaims import crawl_web_claims, registered_domain  # noqa: E402
 from norway_company_agent.nav_jobs import NavJobIndex, attach_postings  # noqa: E402
-from scripts.build_prototype import build as build_viewer_html  # noqa: E402
+from norway_company_agent.synthesis import apply_envelope_summary  # noqa: E402
+from norway_company_agent.viewer import build_viewer_html  # noqa: E402
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -330,12 +331,19 @@ def main() -> None:
                 refresh_envelopes(envs, previous_envelopes)
             except Exception as exc:
                 print(f"Refresh skipped at deadline: {type(exc).__name__}: {exc}", flush=True)
+            for env in envs:
+                apply_envelope_summary(env)
             write_jsonl(output_path, envs)
             write_jsonl(
                 Path(args.profiles_output) if args.profiles_output else output_path.with_suffix(".profiles.jsonl"),
                 final_profiles,
             )
             print(f"Wrote {len(envs)} envelopes before exit.", flush=True)
+            try:
+                (Path(args.viewer) if args.viewer else output_path.with_suffix(".viewer.html")).write_text(
+                    build_viewer_html(envs, {"run_id": args.run_id, "started_at": started_at, "completed_at": completed}), encoding="utf-8")
+            except Exception as exc:
+                print(f"Viewer skipped at deadline: {type(exc).__name__}: {exc}", flush=True)
         except Exception as exc:
             print(f"Deadline flush error: {type(exc).__name__}: {exc}", flush=True)
         finally:
@@ -468,6 +476,9 @@ def main() -> None:
     except Exception as exc:  # per-company failures are already caught; this is a last guard
         refresh_stats = {"compared": 0, "material_changes": 0, "companies_changed": 0, "failed": len(envelopes), "error": f"{type(exc).__name__}: {exc}"}
     print(f"[{utc_now()}] Refresh: {json.dumps(refresh_stats)}", flush=True)
+    # The summary is built last, from each envelope's own published claims and refresh result.
+    for env in envelopes:
+        apply_envelope_summary(env)
 
     profiles_output_path = Path(args.profiles_output) if args.profiles_output else output_path.with_suffix(".profiles.jsonl")
     report_path = Path(args.report) if args.report else output_path.with_suffix(".report.json")
@@ -519,7 +530,7 @@ def main() -> None:
 
     # Generate UX Viewer HTML
     try:
-        html_content = build_viewer_html(ordered_profiles, score=None)
+        html_content = build_viewer_html(envelopes, {"run_id": args.run_id, "started_at": started_at, "completed_at": completed_at})
         viewer_path.parent.mkdir(parents=True, exist_ok=True)
         viewer_path.write_text(html_content, encoding="utf-8")
         print(f"Wrote viewer HTML to {viewer_path}")

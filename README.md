@@ -68,6 +68,30 @@ uv run --with pytest pytest -q
 all run the same agent and write the same envelopes. Outputs next to `--output`: `.profiles.jsonl`,
 `.report.json` (run report: runtime, requests, third-party cost 0) and `.viewer.html`.
 
+### Reading the results: summary and viewer
+
+Each envelope starts with a `summary` (also the first claim, `summary_profile`): what the company
+is and does (register industry and activity text, the verified website's own description), its size
+and latest filed accounts, **what changed** (movements between the reported years in the accounts
+register, the latest role updates in the register, former names, the newest dated item on its
+website, and the result of the refresh against the previous run), leadership and locations, web
+presence, hiring, dated activity, and **what is not known**. Every sentence is assembled from the
+envelope's own published claims; numbered markers such as `[3]` point at the `sources` list, and
+each source lists the evidence ids it stands for. `eval/synthesis_validator.py` checks that every
+date, amount, URL, quote and name in a summary matches a published claim.
+
+Open `<output>.viewer.html` in any browser (desktop or phone; it works offline):
+
+- **Find**: search by name, organisation number, municipality, industry, registered activity or a
+  role holder's name; the tiles at the top and the filters narrow the list; sort by revenue,
+  revenue growth, employees or latest news.
+- **Compare**: tick up to four companies (or press *Add to compare* on a profile) and press
+  *Compare*: one table with the register facts, three-year figures, leadership, website, social
+  profiles, news and hiring, each with its source; download it as CSV or copy a link.
+- **Verify**: every summary sentence links to its sources, every value links to the page it was
+  read from, and *Evidence* lists every published claim with the quoted span, fetch time and the
+  SHA-256 of the fetched content. `#org=<organisation number>` links straight to a profile.
+
 The published archive was clean-room verified on August 24, 2026: 104 tests and 5 subtests passed, followed by a one-company live BRREG smoke run with one terminal envelope, five requests and zero silent drops.
 
 Increase `--count` and `--expected-count` together for a larger local test. The 100-row smoke test above is practice only; Builderr supplies the companies for every official run.
