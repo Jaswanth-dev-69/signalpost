@@ -276,23 +276,69 @@ traceable; claim audit 0; headless checks pass.
 | Forced hard deadline (proxy-200, 75 s) | exit 0 at 76 s, 200/200 envelopes, schema 0, summaries and viewer written |
 | 1,500 projection (summed request latency, scaled from v3's measured 990 s) | 1,134–1,193 s; the real 1,200 run scales to about 700 s |
 
-## Packaging (15 Oct ~00:20 IST)
+### Blind review round 3 (absolute grading, 20 companies, output of `8dad2bb`)
 
-- Agent code of v5: `8dad2bb6cdd1bd04df8a66720bbc253341675fda` (pushed; full gate above, guard-clean S/U changes on top of the
-  gated `a23df29`).
-- Cold-cache fresh clone of `8dad2bb` from GitHub into an empty directory with an empty `UV_CACHE_DIR`
-  and no virtualenv: `uv sync` exit 0 (2 s, 82 MB cache), the one command on the 100-company smoke list
-  exit 0 in 263 s, 100/100 envelopes, schema validator 0 errors, summaries 100/100 traceable, claim audit
-  0 issues. `docs/smoke-test/` regenerated from that run (README, envelopes, report, input list and the
-  run's viewer `smoke-viewer.html`).
-- Submission commit: the `main` commit that carries that smoke test (docs only on top of `8dad2bb`).
-  Email draft: `docs/V5_EMAIL.md` (hash and contact as placeholders); a filled copy is kept outside the
+Summaries mean level **3.90/5** (does 3.40, changed 3.90, unknowns 3.70, sources 4.85, no unsupported
+claims 3.95, useful 3.55); viewer **4/5**. All spot-checked facts correct. Its prompt added one
+fairness sentence (do not mark down for information the stated sources cannot contain), so it is not
+strictly comparable with round 2 (3.80).
+
+### S/U rounds 4 and 5 (after review round 3; `2456ff1`, `7eebddd`, `e7a339c`, `5f688f9`)
+
+- English glossary for the registered activity text (key terms in order of appearance, e.g.
+  "barnehage" → kindergarten; holding and property as terms, never replacing the main activity):
+  509 of 600 briefs now say in English what the company does.
+- Results in words (a profit/loss of NOK X), direction always stated, the financial-items amount,
+  thin equity, first full accounting year, news chosen by business relevance (contracts, launches,
+  results, appointments) with greetings and seasonal posts left out, analytical unknowns (what a
+  holding company owns, what caused a loss), candidate-website sources labelled as such.
+- **Group (konsern) figures** (`group_financials`, one claim per group year from the accounts
+  response already fetched, every figure a value-literal span): group companies lead with group
+  revenue and result, parent figures labelled; the viewer shows a group accounts table, group revenue
+  in badges, sort and compare. Census of all accounts spans on the live API: 4,469/4,469 verbatim in
+  both JSON and XML.
+- `registered_activity` published as the register's own lines (each verbatim in the source; a
+  precision audit that looks for the value now finds it: 96/100 → 100/100).
+- News from a site that stamps every page with the fetch time is not published as dated news
+  (1 company of 600: lorem-ipsum pages).
+- Viewer: register changes only in the 90-day filter; hiring excludes pages that state no openings;
+  junk news filtered everywhere; website identity proof shown; compare legend, group rows, accounts
+  period; "registered at the start" in the timeline; collapsible filters and sticky search on phones;
+  evidence as stacked cards on phones; a unit test parses the viewer script with node.
+
+### Final push gate (code `5f688f9`)
+
+| Check | Result |
+|---|---|
+| Unit tests | 194 pass (on a `git archive` of the commit) |
+| Live runs `v5g` (code `7eebddd`) and offline rebuilds with `5f688f9` from their profiles | schema 0, claim audit 0, summaries 600/600 traceable on sample-100, proxy-200, set-300 |
+| Regression guard (`--base 6aed2a2 --new 7eebddd`) on live profiles | clean; only listed additions (`group_financials` 30 claims for 10 group companies on sample-100) |
+| Accounts span census (live, JSON and browser-style XML) | 4,469/4,469 verbatim |
+| precision_audit (100 claims, sample-100, `5f688f9`) | 100/100 supported, **0 wrong-company**; web spans 16/17 (homepage that does not print its own URL) |
+| evidence_audit (v5g sample-100) | 99.3% (the one miss was a page-stamped news date, no longer published in `5f688f9`) |
+| Red team | 0/35 |
+| Determinism pair (`det7`, proxy-200) | 0 duplicates, 0 change events, refresh 0 material, non-summary claims identical 200/200 |
+| Viewer headless | 0 errors; all find/compare/verify/mobile checks pass |
+| Runtime, 1,500 projection | 1,111 s (proxy-200), 1,175 s (sample-100), 1,123 s (set-300) |
+
+Coverage (companies/facts) on the final live runs: sample-100 website 71/71, social 40/84, news
+33/376, hiring 20/24; proxy-200 44/44, 21/41, 21/251, 16/17; set-300 83/83, 45/86, 31/339, 16/38
+(within ±2 companies of the earlier v5 runs; the crawl noise floor).
+
+## Packaging (15 Oct 2026)
+
+- Agent code of v5: `5f688f9bc312e5251a0588f41d65edc2fc00a923` (pushed).
+- Cold-cache fresh clone of `5f688f9` from GitHub into an empty directory with an empty
+  `UV_CACHE_DIR` and no virtualenv: `uv sync` exit 0 (3 s), the one command on the 100-company smoke
+  list exit 0 in 259 s, 100/100 envelopes, schema validator 0 errors, summaries 100/100 traceable,
+  claim audit 0 issues, precision audit 100/100 with 0 wrong-company. `docs/smoke-test/` regenerated
+  from that run (README, envelopes, report, input list and `smoke-viewer.html`).
+- Submission commit: the `main` commit that carries that smoke test (docs only on top of `5f688f9`).
+  Email draft `docs/V5_EMAIL.md` (hash and contact as placeholders); a filled copy is kept outside the
   repository. Nothing has been sent.
 
-## Status (15 Oct 2026, night)
+## Status (15 Oct 2026)
 
-- WS-A (Synthesis and UX), WS-B (news/hiring shape and quality) and three S/U rounds are on `main`
-  with their gates; WS-C measured (real 1,200-company run 553 s, 0.9 GB).
-- Agent code `8dad2bb`; submission commit = the docs commit carrying the cold-clone smoke test.
-- Not done: no evidence that our news/hiring items now match Builderr's verified pool (only their
-  scorer can show it); website and social coverage unchanged by design (identity gate untouched).
+- WS-A, WS-B, five S/U rounds and WS-C are on `main` with their gates.
+- Not established: whether our news and hiring items now match Builderr's verified pool (only their
+  scorer can show it). Website and social coverage are unchanged by design (identity gate untouched).

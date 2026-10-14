@@ -60,23 +60,24 @@ v4 `956f53be`).
    with the brief, key metrics and a revenue trend, three years of accounts, a dated timeline, and an
    evidence table with the quoted span, fetch time and content hash for every claim. A 1,200-company
    viewer is 13 MB and opens in under a second.
-3. **More register facts from the responses already fetched:** the registered business activity,
-   former names, the two earlier years of the accounts response (`financial_history`, every figure
-   quoted as a value literal that is verbatim in both the JSON and the XML representation) and whether
-   group accounts exist (`group_accounts`).
+3. **More register facts from the responses already fetched:** the registered business activity
+   (the register's own lines), former names, the two earlier years of the accounts response
+   (`financial_history`) and, for groups, the group (konsern) accounts (`group_financials`, with
+   `group_accounts` listing the years). Every figure is quoted as a value literal that is verbatim in
+   both the JSON and the XML representation of the accounts API.
 4. **News and hiring items carry title, direct URL, publication date and organisation number** in the
    claim, the observation record and `external.company_site`. An item read from a feed or listing now
    cites its own article page when that page shows the title (the date stays quoted from the feed or
-   listing). Tracking parameters are stripped from item URLs, category/section pages and site-name
-   titles are no longer published as news, and the news listing pages that produced items also appear
-   in the kit profile's bounded `pages`.
+   listing). Tracking parameters are stripped from item URLs; category/section pages, site-name titles
+   and pages stamped with the fetch time are no longer published as news; and the news listing pages
+   that produced items also appear in the kit profile's bounded `pages`.
 
-Checks on the submitted commit: unit tests pass; schema validator 0 errors; claim audit 0 issues; a
+Checks on the submitted code: unit tests pass; schema validator 0 errors; claim audit 0 issues; a
 100-claim precision audit 100/100 supported with **0 wrong-company publications**; evidence spans
-100% verbatim on re-fetch (external-claim census 99.9% one-node over 1,844 items); a 35-company
-wrong-company red team 0 false positives; the same batch run twice gives 0 duplicates and 0 change
-events; a forced hard deadline still writes every envelope, summary and the viewer; a real
-1,200-company run completed in 553 s with 0.9 GB peak memory.
+verbatim on re-fetch (accounts 4,469/4,469 in both JSON and XML; external claims 99.9% one-node over
+1,844 items); a 35-company wrong-company red team 0 false positives; the same batch run twice gives 0
+duplicates and 0 change events; a forced hard deadline still writes every envelope, summary and the
+viewer; a real 1,200-company run completed in 553 s with 0.9 GB peak memory.
 
 One question, if you have a moment: which shape do you read for dated news and hiring (the claims,
 `external.observations`, `external.company_site`, or the kit profile's `pages`)? Every shape carries
