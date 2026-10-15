@@ -463,6 +463,13 @@ Why the rest is not reachable within the rules:
   of 71 verified sites, 1 links any LinkedIn post or job and 0 link the ones Builderr lists, so
   **rejected** (0 measured gain). The kit's LinkedIn guest-jobs connector is not used (LinkedIn
   robots.txt, browser-like user agent, our source rules).
+- **H22** (the register's own e-mail domain, already a discovery candidate under the strict proof:
+  resolve a homonym conflict when only this company declares the domain). Live sizing over every
+  company without a verified website: sample-100 29 (19 without a usable e-mail domain, 3 sites not
+  reachable, 4 without organisation number or name plus municipality, 2 printing another
+  organisation number, 1 homonym conflict whose domain two entities declare), set-300 219 (161, 19,
+  27, 12, 0 homonym conflicts). **0 companies** would be rescued, so **rejected**. The 27 + 4 sites
+  without proof stay unpublished: accepting them on name tokens and hostname would loosen the gate.
 
 ## Packaging (15 Oct 2026, final)
 
