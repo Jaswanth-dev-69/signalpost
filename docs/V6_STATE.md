@@ -342,3 +342,27 @@ Checks on `481509c`: 236 unit tests pass (12 new); offline rebuild of the three 
 0 errors (600/600 grounded), schema 0, claim audit 0, regression guard clean against `48dc33d` (no
 claim, evidence or other envelope field changed); headless viewer checks pass on sample-100 and
 set-300 (0 console or page errors, 0 failures).
+
+### Push gate (code `481509c`, live, 16 Oct 04:02-04:22 IST)
+
+| Check | Result |
+|---|---|
+| Unit tests | 236 pass |
+| Determinism pair (`det7f`, proxy-200 twice into one file) | 0 duplicates, 0 change events, refresh 200 compared / 0 material; non-summary claims identical 199/200 (serit.no serves titles with and without " - Serit", as in v4-v6); summaries identical apart from the second run's refresh sentence for 199/200 (917790531: the same three news items, titles, dates and URLs, cited from their article pages instead of the feed in the second run, so source numbers moved) |
+| 1,500-company run (`v7f-set-1500`) | exit 0, **684 s** wall (682.3 s in the agent; `v6a` 721 s), 0.99 GB peak RSS, 1,500/1,500 envelopes, 0 tracebacks; 18,915 requests, p50 203 ms, p95 2,345 ms; HTTP 429 web 17, registry 0 |
+| Schema / claim audit / summary validator | 0 / 0 / 0 on the 1,500 run and on the determinism run |
+| Regression guard on live profiles (base `48dc33d`) | clean on the determinism run (200) and the 1,500 run |
+| Live 1,500-company viewer | 16.6 MB, ready 0.62 s desktop / 0.54 s phone, all headless checks pass, 0 errors |
+| Viewer at 1,000 / 1,100 (first N `v6a` set-1500 profiles, code `481509c`) | 11.05 MB, ready 0.48 s / 0.39 s; 12.17 MB, 0.52 s / 0.42 s; all checks pass |
+| Precision, evidence, red team | measured on `v7a` (same crawl and claim code; the guard shows claims and evidence unchanged by `ab5bcca`/`481509c`): 100/100 supported, 0 wrong-company; spans 100.0% (`v6a` 99.4%); red team 0/35 |
+| Forced hard deadline (75 s, proxy-200, code `481509c`) | exit 0 in 77 s; 200/200 envelopes, 200/200 summaries, viewer written; 48 web passes cut off and stated as such; schema 0, summary validator 0, claim audit 0; 0.48 GB peak |
+
+Against the fallback `85a544c` (agent code `0ca6042`) on every measured item: precision 100/100 with 0
+wrong-company (same); evidence spans 100.0% against 99.4%; descriptions inside one text node
+66/66, 40/40, 81/81 against 65/66, 39/41, 79/82, with one description withdrawn under the step-1 rule
+(bjornebarstien.no, set-300: published descriptions 66, 41, 81 against 66, 41, 82); red team 0/35
+(same); non-summary claims identical 199/200 in the determinism pair (`detv6` 198/200); 1,500-company
+run 684 s and 0.99 GB (`v6a` 721 s and 1.0 GB); every other claim unchanged (regression guard); the
+summaries and the viewer changed only as listed under step 3, with the validator, the guard and the
+headless checks clean. The blind review graded the summaries before the step-3 fixes; the fixes
+themselves were not reviewed again (one round allowed).
