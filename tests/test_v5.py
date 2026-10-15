@@ -245,7 +245,7 @@ class SummaryRules(unittest.TestCase):
     def test_roles_set_at_registration_are_not_changes(self):
         env = self.env_with({"field": "founded_date", "value": "2012-11-19"},
                             {"field": "registered_roles", "value": [self.role("Kari Nordmann", "DAGL", "DAGL", "2012-12-01")]})
-        self.assertIn("The registered roles have not changed since the company was registered in 2012", envelope_summary(env)["text"])
+        self.assertIn("The registered roles have not changed since the company was founded in 2012", envelope_summary(env)["text"])
 
     def test_part_year_periods_are_not_compared(self):
         env = envelope(profile())
@@ -273,3 +273,127 @@ class SummaryRules(unittest.TestCase):
         env["claims"] = [c for c in env["claims"] if c["field"] != "registered_activity" or "barnehage" in str(c.get("value"))]
         text = envelope_summary(env)["text"]
         self.assertIn("in English, this text mentions kindergarten and owning shares in other companies", text)
+
+
+def custom_year(y: int, revenue: float, operating: float, result: float, assets: float, debt: float) -> dict:
+    return {"id": y, "regnskapstype": "SELSKAP", "regnskapsperiode": {"fraDato": f"{y}-01-01", "tilDato": f"{y}-12-31"}, "valuta": "NOK",
+            "resultatregnskapResultat": {"driftsresultat": {"driftsinntekter": {"sumDriftsinntekter": revenue}, "driftsresultat": operating},
+                                         "aarsresultat": result},
+            "eiendeler": {"sumEiendeler": assets}, "egenkapitalGjeld": {"gjeldOversikt": {"sumGjeld": debt}}}
+
+
+class SummaryRound5(unittest.TestCase):
+    """Round-5 review rules: result wording, the brief's priorities, stale news, holding and
+    pass-through companies, and how a website's identity is stated."""
+
+    def env_for(self, accounts: list[dict], completed: str = "2026-10-14T00:00:00Z") -> dict:
+        p = profile()
+        p["evidence"]["financials"]["value"] = normalize_financials(accounts)
+        env = envelope(p)
+        env.setdefault("run", {})["completed_at"] = completed
+        return env
+
+    def test_losses_narrow_or_widen_and_profits_rise_or_fall(self):
+        from norway_company_agent.synthesis import _result_move
+        self.assertEqual(_result_move("Its", -100000, -40000, "2024"), "Its annual loss narrowed sharply from 2024")
+        self.assertEqual(_result_move("Its", -100000, -350000, "2024"), "Its annual loss more than tripled from 2024")
+        self.assertEqual(_result_move("Its", 100000, 250000, "2024"), "Its annual profit more than doubled from 2024")
+        self.assertEqual(_result_move("Its", 100000, 300000, "2024"), "Its annual profit more than doubled from 2024")  # exactly tripled
+        self.assertEqual(_result_move("The group's", 400000, 150000, "2024"), "The group's annual profit fell sharply from 2024")
+
+    def test_brief_names_the_top_change_and_still_flags_negative_equity(self):
+        env = self.env_for([custom_year(2024, 1000000.0, -200000.0, -200000.0, 900000.0, 800000.0),
+                            custom_year(2025, 1100000.0, 150000.0, 150000.0, 500000.0, 800000.0)])
+        brief = envelope_summary(env)["text"].split("\n")[0]
+        self.assertIn("It swung from a loss in 2024 to a profit in 2025", brief)
+        self.assertIn("Its equity is negative", brief)
+        self.assertLess(brief.index("It swung"), brief.index("Its equity is negative"))
+
+    def test_financial_items_name_the_year_and_partnerships_pay_no_entity_tax(self):
+        env = self.env_for([custom_year(2024, 1000000.0, 100000.0, 80000.0, 900000.0, 400000.0),
+                            custom_year(2025, 1100000.0, 150000.0, -60000.0, 900000.0, 400000.0)])
+        text = envelope_summary(env)["text"]
+        self.assertIn("In 2025, financial costs and tax of NOK 210 thousand turned an operating profit", text)
+        next(c for c in env["claims"] if c["field"] == "legal_form")["value"] = "DA"
+        text = envelope_summary(env)["text"]
+        self.assertIn("In 2025, net financial costs of NOK 210 thousand turned an operating profit", text)
+        self.assertNotIn("tax", text.split("Not known")[0].split("Size and finances")[1])
+
+    def test_news_older_than_a_year_is_not_a_change_and_is_called_old(self):
+        env = envelope(profile())
+        env.setdefault("run", {})["completed_at"] = "2026-10-14T00:00:00Z"
+        ev = env["claims"][0]["evidence_ids"]
+        env["claims"].append({"field": "dated_news", "availability": "available", "evidence_ids": ev, "value": "Ny kontrakt med kommunen (2024-03-01)",
+                              "title": "Ny kontrakt med kommunen", "published_at": "2024-03-01", "url": "https://www.example.no/nyheter/kontrakt"})
+        text = envelope_summary(env)["text"]
+        changed = next(line for line in text.split("\n") if line.startswith("What changed"))
+        self.assertNotIn("Ny kontrakt", changed)
+        self.assertIn("none is from the last twelve months", text)
+
+    def test_event_posts_are_not_business_news(self):
+        from norway_company_agent.synthesis import SEASONAL_NEWS
+        for title in ("Møt oss på konferansen i Bergen", "Webinar: nye regler", "Investor Day 2026", "Velkommen til messe på Lillestrøm"):
+            self.assertTrue(SEASONAL_NEWS.search(title), title)
+        self.assertFalse(SEASONAL_NEWS.search("Ny kontrakt med Statens vegvesen"))
+
+    def test_holding_company_names_the_unknown_shareholdings(self):
+        env = envelope(profile())
+        next(c for c in env["claims"] if c["field"] == "registered_activity")["value"] = ["Holdingselskap. Eie og forvalte aksjer i andre selskaper."]
+        self.assertIn("which companies it holds shares in (shareholdings are not among the sources checked)", envelope_summary(env)["text"])
+
+    def test_website_identity_is_stated_only_from_real_proof(self):
+        env = envelope(profile())
+        site = next(c for c in env["claims"] if c["field"] == "official_website")
+        evidence = {e["id"]: e for e in env["evidence"]}
+        for i in site["evidence_ids"]:
+            evidence[i]["claim_span"] = "Hjemmeside"  # a menu label, not the register's homepage field
+        online = next(line for line in envelope_summary(env)["text"].split("\n") if line.startswith("Online presence"))
+        self.assertNotIn("homepage listed in the register", online)
+        self.assertNotIn("names the company", online)
+        evidence[site["evidence_ids"][0]]["claim_span"] = '"hjemmeside":"www.example.no"'
+        online = next(line for line in envelope_summary(env)["text"].split("\n") if line.startswith("Online presence"))
+        self.assertIn("it is the homepage listed in the register", online)
+
+
+class ViewerRound5(unittest.TestCase):
+    def test_search_covers_the_english_activity_terms(self):
+        env = envelope(profile())
+        next(c for c in env["claims"] if c["field"] == "registered_activity")["value"] = ["Drift av barnehage og tilhørende virksomhet, herunder", "deltakelse i andre selskaper."]
+        apply_envelope_summary(env)
+        self.assertEqual(viewer_record(env)["ag"], ["kindergarten", "owning shares in other companies"])
+        html = build_viewer_html([env], {"run_id": "test"})
+        self.assertIn("(x.ag||[]).join(' ')", html)
+
+    def test_section_links_scroll_without_leaving_the_profile(self):
+        html = build_viewer_html([envelope(profile())], {"run_id": "test"})
+        self.assertIn("closest('a[href^=\"#s-\"],a.skip')", html)
+        self.assertIn("if(/^#(s-[a-z]+|q)$/.test(location.hash))return;", html)
+
+
+class FirstAccounts(unittest.TestCase):
+    def env_for(self, founded: str, first: dict) -> dict:
+        p = profile()
+        p["evidence"]["financials"]["value"] = normalize_financials([first, year(2025, 1500000.0, 90000.0)])
+        env = envelope(p)
+        ev = env["claims"][0]["evidence_ids"]
+        env["claims"] = [c for c in env["claims"] if c["field"] != "founded_date"]
+        env["claims"].append({"field": "founded_date", "value": founded, "availability": "available", "evidence_ids": ev})
+        return env
+
+    def first_period(self, start: str, end: str) -> dict:
+        y = year(2024, 300000.0, -20000.0)
+        y["regnskapsperiode"] = {"fraDato": start, "tilDato": end}
+        return y
+
+    def test_first_accounts_starting_on_the_founding_day(self):
+        text = envelope_summary(self.env_for("2024-09-16", self.first_period("2024-09-16", "2024-12-31")))["text"]
+        self.assertIn("2025 was its first full accounting year; its first accounts covered only the 4-month period 2024-09-16 to 2024-12-31", text)
+
+    def test_a_long_first_period_is_not_called_short(self):
+        text = envelope_summary(self.env_for("2023-10-17", self.first_period("2023-10-17", "2024-12-31")))["text"]
+        self.assertIn("2025 was its first twelve-month accounting year; its first accounts covered the 15-month period 2023-10-17 to 2024-12-31", text)
+
+    def test_an_old_company_with_a_short_period_is_not_called_new(self):
+        text = envelope_summary(self.env_for("2001-05-02", self.first_period("2024-07-01", "2024-12-31")))["text"]
+        self.assertNotIn("first full accounting year", text)
+        self.assertIn("cover periods of different length, so they are not compared", text)
