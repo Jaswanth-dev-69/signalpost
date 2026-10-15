@@ -474,6 +474,9 @@ Why the rest is not reachable within the rules:
   404, refused; robots-blocked sites excluded). Today discovery runs only when there is no website
   record at all. Live sizing: 3 + 8 + 16 companies on sample-100, proxy-200 and set-300, **0** sites
   found under the strict proof, so **rejected**.
+- **H24** (DiBK's central approval register as an official source of websites for construction
+  firms): its `/enterprises/<organisation number>` pages are open to crawlers (`/api/` is not), but
+  they show name, addresses, employee band and approval areas only, no homepage, so **rejected**.
 - NAV hiring already matches the company's own number and every registered sub-unit
   (`company_orgnrs`), so there is no gain there either. LinkedIn: `robots.txt` is
   `User-agent: * / Disallow: /` and Builderr's sources brief forbids scraping that robots prohibit.
