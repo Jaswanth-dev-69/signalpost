@@ -470,6 +470,13 @@ Why the rest is not reachable within the rules:
   organisation number, 1 homonym conflict whose domain two entities declare), set-300 219 (161, 19,
   27, 12, 0 homonym conflicts). **0 companies** would be rescued, so **rejected**. The 27 + 4 sites
   without proof stay unpublished: accepting them on name tokens and hostname would loosen the gate.
+- **H23** (run the same strict discovery when the register's homepage fails: timeouts, DNS, 5xx,
+  404, refused; robots-blocked sites excluded). Today discovery runs only when there is no website
+  record at all. Live sizing: 3 + 8 + 16 companies on sample-100, proxy-200 and set-300, **0** sites
+  found under the strict proof, so **rejected**.
+- NAV hiring already matches the company's own number and every registered sub-unit
+  (`company_orgnrs`), so there is no gain there either. LinkedIn: `robots.txt` is
+  `User-agent: * / Disallow: /` and Builderr's sources brief forbids scraping that robots prohibit.
 
 ## Packaging (15 Oct 2026, final)
 
