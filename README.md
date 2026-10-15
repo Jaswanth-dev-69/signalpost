@@ -85,14 +85,17 @@ date, amount, URL, quote and name in a summary matches a published claim.
 Open `<output>.viewer.html` in any browser (desktop or phone; it works offline).
 `docs/smoke-test/smoke-viewer.html` is the viewer of the 100-company smoke test.
 
-- **Find**: search by name, organisation number, municipality, industry (Norwegian or English),
-  registered activity or a role holder's name; tiles and filters (legal form, industry, municipality,
-  accounts, website, social, news, hiring, changed in the last 90 days, register status); sort by
-  revenue, revenue growth, employees or latest news; saved searches.
+- **Find**: search by name, organisation number, municipality, industry code or name (Norwegian or
+  English), registered activity (also by its key terms in English) or a role holder's name; tiles and
+  filters (legal form, industry, municipality, accounts, website, social, news, hiring, changed in the
+  last 90 days, register status); sort by revenue, revenue growth, employees or latest news; saved
+  searches. On a phone the search box stays on screen while the list scrolls.
 - **Compare**: tick up to four companies (or press *Add to compare* on a profile) and press
-  *Compare*: one table (cards on a phone) with the register facts, three years of revenue, results,
-  equity, group accounts, leadership, website, social profiles, news, hiring and recent changes;
-  download it as CSV or copy a link.
+  *Compare*: one table (cards on a phone) that starts with what each company does and its finances
+  (three years of revenue, results, assets, debt and equity, on the group basis where group accounts
+  are filed; amounts shortened, with the full figure on hover and in the CSV), then leadership,
+  website, social profiles, news, hiring, recent changes and the register facts; download it as CSV
+  or copy a link.
 - **Verify**: each profile opens with the brief and key metrics (with source links), then the full
   summary with numbered sources, a dated timeline of changes, and *Evidence*: every published claim
   with the quoted span, the source page, fetch time and (on request) the SHA-256 of the fetched

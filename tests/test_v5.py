@@ -330,6 +330,14 @@ class SummaryRound5(unittest.TestCase):
         self.assertNotIn("Ny kontrakt", changed)
         self.assertIn("none is from the last twelve months", text)
 
+    def test_a_zero_result_is_not_called_a_profit(self):
+        env = self.env_for([custom_year(2024, 0.0, -16000.0, -16000.0, 20000.0, 5000.0), custom_year(2025, 0.0, 0.0, 0.0, 9500.0, 0.0)])
+        text = envelope_summary(env)["text"]
+        self.assertIn("Its latest accounts (2025) show an annual result of NOK 0 and no revenue", text)
+        self.assertIn("an operating result of NOK 0 and an annual result of NOK 0", text)
+        self.assertNotIn("profit of NOK 0", text)
+        self.assertNotIn("swung", text)
+
     def test_event_posts_are_not_business_news(self):
         from norway_company_agent.synthesis import SEASONAL_NEWS
         for title in ("Møt oss på konferansen i Bergen", "Webinar: nye regler", "Investor Day 2026", "Velkommen til messe på Lillestrøm"):

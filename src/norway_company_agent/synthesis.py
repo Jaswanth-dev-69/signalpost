@@ -433,6 +433,13 @@ def activity_terms(activity: str, form: str | None = None) -> list[str]:
     return [e for _, e in sorted(found)][:3]
 
 
+def _kind_pl(kind: str, value: float, currency: str | None, article: str = "an") -> str:
+    """'an operating profit of NOK X', 'an annual loss of NOK X', or 'an annual result of NOK 0'."""
+    if value == 0:
+        return f"{article} {kind} result of {_money(0, currency)}".strip()
+    return f"{article} {kind} {'loss' if value < 0 else 'profit'} of {_money(abs(value), currency)}".strip()
+
+
 def _result_move(subject: str, old: float, new: float, old_label: str) -> str:
     """The brief's words for a large move between two results of the same sign: a profit rises or
     falls, a loss narrows or widens."""
@@ -670,11 +677,11 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
             parts.append(f"revenue of {_money(latest['revenue'], currency)}")
         if latest["operating_result"] is not None:
             op = latest["operating_result"]
-            parts.append(f"an operating {'loss' if op < 0 else 'profit'} of {_money(abs(op), currency)}")
+            parts.append(_kind_pl("operating", op, currency))
         if latest["annual_result"] is not None:
             res = latest["annual_result"]
-            kind = "loss" if res < 0 else "profit"
-            parts.append(f"an annual {kind} of {_money(abs(res), currency)}" if result_noun == "annual result" else f"a {kind} for the period of {_money(abs(res), currency)}")
+            kind = "loss" if res < 0 else "profit" if res > 0 else "result"
+            parts.append(_kind_pl("annual", res, currency) if result_noun == "annual result" else f"a {kind} for the period of {_money(abs(res), currency)}")
         tail = []
         if latest["assets"] is not None:
             tail.append(f"total assets of {_money(latest['assets'], currency)}")
@@ -689,8 +696,9 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         operating, annual = latest["operating_result"], latest["annual_result"]
         if operating is not None and annual is not None and abs(annual - operating) > max(100_000, 0.25 * abs(operating)):
             gap = annual - operating
-            op_text = f"an operating {'loss' if operating < 0 else 'profit'} of {_money(abs(operating), currency)}"
-            an_text = f"{'a' if result_noun != 'annual result' else 'an annual'} {'loss' if annual < 0 else 'profit'}{' for the period' if result_noun != 'annual result' else ''} of {_money(abs(annual), currency)}"
+            op_text = _kind_pl("operating", operating, currency)
+            an_text = _kind_pl("annual", annual, currency) if result_noun == "annual result" else \
+                f"a {'loss' if annual < 0 else 'profit' if annual > 0 else 'result'} for the period of {_money(abs(annual), currency)}"
             verb = "turned" if (operating < 0) != (annual < 0) else ("lifted" if gap > 0 else "reduced")
             link = "into" if verb == "turned" else "to"
             taxless = form in PASS_THROUGH_FORMS
@@ -706,7 +714,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
             for field, kind in (("operating_result", "operating"), ("annual_result", "annual")):
                 value_ = group_latest.get(field)
                 if value_ is not None:
-                    g_parts.append(f"an {kind} {'loss' if value_ < 0 else 'profit'} of {_money(abs(value_), g_currency)}")
+                    g_parts.append(_kind_pl(kind, value_, g_currency))
             g_tail_parts = [f"total assets of {_money(group_latest[k], g_currency)}" if k == "assets" else f"debt of {_money(group_latest[k], g_currency)}"
                             for k in ("assets", "debt") if group_latest.get(k) is not None]
             g_tail = f", with {_join(g_tail_parts)}" if g_tail_parts else ""
@@ -754,7 +762,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                     text = _change(old, new, currency, noun, prev_label, latest_label, result=field == "annual_result",
                                    small=small_result if field == "annual_result" else SMALL_AMOUNT)
                     changed.append((text[:1].upper() + text[1:], cited + available(field)))
-                    swing = (old < 0) != (new < 0) and max(abs(old), abs(new)) >= small_result
+                    swing = old * new < 0 and max(abs(old), abs(new)) >= small_result
                     big = old != 0 and abs(new - old) >= 0.5 * abs(old) and min(abs(old), abs(new)) >= small_result
                     if field == "annual_result" and (swing or big) and not group_years:
                         if swing:
@@ -818,7 +826,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                     group_sentences.append((text[:1].upper() + text[1:], group_years[:2]))
                     if field == "revenue":
                         group_move = (old, new, g_old_label)
-                    elif (old < 0) != (new < 0) and max(abs(old), abs(new)) >= g_small:
+                    elif old * new < 0 and max(abs(old), abs(new)) >= g_small:
                         material.append((1, f"The group swung from a {'loss' if old < 0 else 'profit'} in {g_old_label} to a {'loss' if new < 0 else 'profit'} in {g_new_label}", group_years[:2]))
                     elif old != 0 and abs(new - old) >= 0.5 * abs(old) and min(abs(old), abs(new)) >= g_small:
                         material.append((2, _result_move("The group's", old, new, g_old_label), group_years[:2]))
@@ -1050,14 +1058,14 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         brief.append(("It is registered as " + ("bankrupt" if value("status_bankrupt") is True else "being wound up"), available("status_bankrupt") + available("status_liquidating")))
     if group_latest and (group_latest.get("revenue") or 0) > 0:
         g_rev = group_latest["revenue"]
-        sentence = f"The group (konsern) had revenue of {_money(g_rev, currency)} in {group_label}"
-        if group_move and min(group_move[0], group_move[1]) >= SMALL_AMOUNT and _money(group_move[0], currency) != _money(group_move[1], currency) \
+        gc = g_currency or currency
+        sentence = f"The group (konsern) had revenue of {_money(g_rev, gc)} in {group_label}"
+        if group_move and min(group_move[0], group_move[1]) >= SMALL_AMOUNT and _money(group_move[0], gc) != _money(group_move[1], gc) \
                 and max(group_move[0], group_move[1]) < 10 * min(group_move[0], group_move[1]):
             old, new = group_move[0], group_move[1]
             sentence += f", {new / old:.1f} times the {group_move[2]} level" if new >= 2 * old else f", {'up' if new > old else 'down'} {abs((new - old) / old * 100):.0f}% on {group_move[2]}"
         if group_latest.get("annual_result") is not None:
-            res = group_latest["annual_result"]
-            sentence += f", with an annual {'loss' if res < 0 else 'profit'} of {_money(abs(res), currency)}"
+            sentence += f", with {_kind_pl('annual', group_latest['annual_result'], gc)}"
         if latest["revenue"] is not None:
             sentence += f"; the parent company's own revenue was {_money(latest['revenue'], currency)}"
         brief.append((sentence, group_years[:2] + available("revenue")))
@@ -1072,12 +1080,13 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                 sentence += f", {new / old:.1f} times the {revenue_move[2]} level" if new >= 2 * old else f", {'up' if new > old else 'down'} {abs((new - old) / old * 100):.0f}% on {revenue_move[2]}"
         if latest["annual_result"] is not None:
             res = latest["annual_result"]
-            sentence += f", with an annual {'loss' if res < 0 else 'profit'} of {_money(abs(res), currency)}" if result_noun == "annual result" \
-                else f", with a {'loss' if res < 0 else 'profit'} for the period of {_money(abs(res), currency)}"
+            sentence += f", with {_kind_pl('annual', res, currency)}" if result_noun == "annual result" \
+                else f", with a {'loss' if res < 0 else 'profit' if res > 0 else 'result'} for the period of {_money(abs(res), currency)}"
         brief.append((sentence, fin_claims + history[:1]))
     elif has_accounts and latest["annual_result"] is not None:
         revenue_note = "" if latest["revenue"] is None else " and no revenue" if latest["revenue"] == 0 else f" and negative revenue of {_money(latest['revenue'], currency)}"
-        brief.append((f"Its latest accounts ({latest_label}) show {_pl(latest['annual_result'], currency)}{revenue_note}", fin_claims))
+        result_text = _pl(latest["annual_result"], currency) if latest["annual_result"] else f"an annual result of {_money(0, currency)}"
+        brief.append((f"Its latest accounts ({latest_label}) show {result_text}{revenue_note}", fin_claims))
     if material:
         ordered = sorted(material, key=lambda m: m[0])
         brief.append((ordered[0][1], ordered[0][2]))
