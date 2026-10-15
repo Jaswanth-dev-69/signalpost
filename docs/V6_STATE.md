@@ -286,3 +286,59 @@ No mismatch found; nothing changed.
 - Which of our facts can enter: by the text, any published finding in an external field family that
   Builderr independently checks. The text does not list the families, the read path or the checking
   method.
+
+## Step 3. Blind review (the one round) and deterministic fixes (code `ab5bcca`, `481509c`)
+
+Packet: 20 companies from sample-100 and set-300 (5 sparsest and 5 richest by available claims, 5
+group or holding companies, 5 random with seed 20261016); summaries from `v7a` (code `48dc33d`) and
+from v2 (`0ded7110`), labelled A/B at random per company; the two viewers labelled X/Y. One
+fresh-context reviewer read only the packet and graded with the strictest standard and no fairness
+allowances (criteria: does, changed, unknown, sources, no unsupported claims, usefulness).
+
+| | new (`48dc33d`) | v2 |
+|---|---|---|
+| Summary, mean overall level (1-5) | **3.45**, won 20 of 20 | 1.75 |
+| c1 does / c2 changed / c3 unknown | 2.75 / 3.70 / 3.75 | 1.95 / 1.00 / 1.75 |
+| c4 sources / c5 no unsupported / c6 useful | 3.70 / 3.30 / 3.10 | 1.00 / 2.10 / 1.70 |
+| Viewer overall (1-5) | **4** | 2 |
+| find desktop, mobile / compare desktop, mobile / verify desktop, mobile | 4, 4 / 4, 3 / 4, 4 | 2, 2 / 1, 1 / 2, 2 |
+
+Every figure, date, role count, name and sub-unit count the reviewer checked against the embedded data
+(8 summaries) matched. New is ahead of v2 on every criterion.
+
+Fixed (deterministic; summaries rebuilt offline from the `v7a` profiles with `481509c` against
+`48dc33d`; summaries changed 47/100, 57/200, 82/300):
+
+| Review finding | Fix | sample-100 / proxy-200 / set-300 |
+|---|---|---|
+| "Investeringstjenestevirksomhet" glossed as owning shares; irrelevant shareholding unknown | terms follow what is invested in (shares and companies, securities, real estate, investment services; plain "investment" only when nothing more specific); terms for funds, banking, management, assistive devices, IT | glosses changed 8 / 13 / 13; shareholding unknown dropped 3 / 6 / 7 |
+| VPFO unexplained | legal forms VPFO, SÆR, ANNA and 7 others named; TVAM and PRE corrected; "an association" | 3 / 5 / 4 |
+| Group 2024 next to parent 2025 without the parent's year | parent's year given when it differs | 0 / 0 / 1 |
+| "the page says there are no open positions" (span quotes only the title) | removed from summary and viewer | 3 / 2 / 2 |
+| "could not be read in this run: failed" | reader terms ("did not return them / could not be reached when this profile was compiled") | 5 / 11 / 16 |
+| meta parenthetical after "newest business news item" | removed | 11 / 5 / 5 |
+| "Other items include" with nothing before | "Among them:" | 31 / 22 / 31 |
+| "the 20 most recent run from" | "are dated from" | 11 / 9 / 9 |
+| a rename stated three times | single recent rename not repeated under Company | 2 / 5 / 10 |
+| "(the accounts give the figures, not the reasons)" twice | given once | 4 / 9 / 12 |
+| no role holders buried under unknowns; uncited unknown | stated under Leadership (and in brief for AS/ASA); unknown cited | 0 / 0 / 1 |
+| sub-units named alphabetically | municipalities named by registered employees | 9 / 7 / 7 |
+| a later launch missed as newest business item | "introduserer", Norwegian appointments count | newest item changed 1 / 3 / 0 |
+| viewer: arrow wraps alone in a tile; "run run-…"; "no earlier run"; "Identity proof quoted from the site" over a register quote | arrow kept with the label's last word (desktop and phone measured); no run IDs or "run" wording; proof labelled by its source | viewer only |
+
+Not changed: auditor or accountant changes on the same date in several companies (the register
+records a change to the role; telling a firm's re-registration from a company decision needs other
+companies' records, which would make one company's output depend on the batch); the
+kraftfinans.no item titled "Månedsrapport for august" at `/manedsrapport-for-mai/` (the site reuses the
+slug; title and date are quoted from that page); untranslated quotes and hyphenation in register
+texts (quotes stay verbatim; no translation model); the YouTube link missing from one social count
+(crawl side); failed bank and fund accounts (Regnskapsregisteret returned an error in the run); In
+brief repetition, citation targets and the evidence table layout (design, not defects); "ambiguous"
+websites (identity gate unchanged by rule). Found while checking, sized only: 4 of 986 published
+news items in the three sets are a section page ("NYHETSARKIV", kraftfinans.no/nyheter/) or template
+posts ("Blog title" twice, a Wix "10 tips for relaxation"); the summary already skips them.
+
+Checks on `481509c`: 236 unit tests pass (12 new); offline rebuild of the three sets: summary validator
+0 errors (600/600 grounded), schema 0, claim audit 0, regression guard clean against `48dc33d` (no
+claim, evidence or other envelope field changed); headless viewer checks pass on sample-100 and
+set-300 (0 console or page errors, 0 failures).
