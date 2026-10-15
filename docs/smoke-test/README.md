@@ -1,6 +1,6 @@
 # 100-company smoke test (v5)
 
-Clean-clone run of **v5, commit `5f688f9bc312e5251a0588f41d65edc2fc00a923`** (the agent code of this revision; later commits change only `docs/`), cloned from
+Clean-clone run of **v5, commit `c9f2049e25dd7ed3e6d64f6ae5ad2e31e081378e`** (the agent code of this revision; later commits change only `docs/`), cloned from
 https://github.com/Jaswanth-dev-69/signalpost into an empty directory with an empty package cache
 (`UV_CACHE_DIR` pointing at a new empty directory) and no virtualenv. Only the declared install step,
 then the one command:
@@ -18,15 +18,15 @@ homepage.
 | Check | Result |
 |---|---|
 | Install | `uv sync` exit 0 in 3 s with an empty cache |
-| Run | exit 0 in 259 s wall (257.7 s inside the agent) |
+| Run | exit 0 in 251 s wall (249.3 s inside the agent) |
 | Envelopes | 100/100; unique True, input order preserved True, zero silent drops True, all terminal True; schema validator 0 errors |
 | Website module states | {'not_found': 89, 'complete': 10, 'blocked_policy': 1} |
 | Claims | 2,199 available, 703 not_available, 10 ambiguous, 5 blocked; 0 non-available claims carrying a value |
 | Companies with a published fact | website 8, social 2, dated news 3, hiring 0 |
 | Hedge records (`external.observations`) | 39 kit observation records, one per published news item, careers page or posting |
 | Summaries | 100/100 envelopes open with `summary` (also the first claim); every sentence traces to a published claim (`eval/synthesis_validator.py`) |
-| Requests | 878; p50 196 ms, p95 1851 ms; HTTP 429 web 0, registry 0; third-party cost 0 |
-| NAV vacancy index | complete True (13516 active ads) |
+| Requests | 869; p50 203 ms, p95 1950 ms; HTTP 429 web 0, registry 0; third-party cost 0 |
+| NAV vacancy index | complete True (13118 active ads) |
 
 Files: `smoke-companies.jsonl` (input), `smoke-envelopes.jsonl.gz` (the 100 envelopes),
 `smoke-report.json` (the run report) and `smoke-viewer.html` (the run's viewer: open it in any

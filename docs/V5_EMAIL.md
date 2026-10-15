@@ -44,8 +44,10 @@ v4 `956f53be`).
 
 1. **A summary that explains the company, what changed and what is unknown.** Every envelope now
    opens with `summary` (also the first claim, `summary_profile`, and `profile.synthesis_summary`):
-   *In brief*, what it does (register industry with its NACE division in English, the registered
-   activity text, the verified website's own description), size and finances, **what changed**
+   *In brief* (what the company is, its latest figures, its most material recent change and its web
+   presence), what it does (register industry with its NACE division in English, the registered
+   activity text with its key terms in English, what the verified website says), size and finances
+   (group accounts first where a group files them), **what changed**
    (movements between twelve-month accounting periods, role changes in the register ranked chief
    executive > board > others, name changes, the newest dated item on its website, and the comparison
    with the previous run), leadership and locations, web presence, hiring, dated activity, and
@@ -55,11 +57,12 @@ v4 `956f53be`).
    negative equity and template posts are labelled as such.
 2. **A viewer for finding, comparing and verifying, on desktop and phone.** `<out>.viewer.html` is
    built from the envelopes: search by name, organisation number, place, industry (Norwegian or
-   English), activity or person; filters and tiles (accounts, website, social, news, hiring, changed in
-   the last 90 days); compare up to four companies (CSV, share link, cards on a phone); each profile
-   with the brief, key metrics and a revenue trend, three years of accounts, a dated timeline, and an
-   evidence table with the quoted span, fetch time and content hash for every claim. A 1,200-company
-   viewer is 13 MB and opens in under a second.
+   English), activity (also by its key terms in English) or person; filters and tiles (accounts,
+   website, social, news, hiring, changed in the last 90 days); compare up to four companies (what
+   each does and its finances first, then leadership, web presence, news, hiring and changes; CSV,
+   share link, cards on a phone); each profile with the brief, key metrics and a revenue trend, three
+   years of accounts, a dated timeline, and an evidence table with the quoted span, fetch time and
+   content hash for every claim. A 1,200-company viewer is 13 MB and opens in under a second.
 3. **More register facts from the responses already fetched:** the registered business activity
    (the register's own lines), former names, the two earlier years of the accounts response
    (`financial_history`) and, for groups, the group (konsern) accounts (`group_financials`, with
@@ -71,13 +74,19 @@ v4 `956f53be`).
    listing). Tracking parameters are stripped from item URLs; category/section pages, site-name titles
    and pages stamped with the fetch time are no longer published as news; and the news listing pages
    that produced items also appear in the kit profile's bounded `pages`.
+5. **Evidence quoted exactly as printed.** Social profiles that a site names only in its structured
+   data (`sameAs`) are now quoted exactly as the page prints them (before: the normalised URL), and a
+   profile the page does not print verbatim is not published. Profiles a site declares in a page's
+   JSON configuration are read by their key and quoted as printed, under the same identity check.
 
-Checks on the submitted code: unit tests pass; schema validator 0 errors; claim audit 0 issues; a
-100-claim precision audit 100/100 supported with **0 wrong-company publications**; evidence spans
-verbatim on re-fetch (accounts 4,469/4,469 in both JSON and XML; external claims 99.9% one-node over
-1,844 items); a 35-company wrong-company red team 0 false positives; the same batch run twice gives 0
-duplicates and 0 change events; a forced hard deadline still writes every envelope, summary and the
-viewer; a real 1,200-company run completed in 553 s with 0.9 GB peak memory.
+Checks on the submitted code: 213 unit tests pass; schema validator 0 errors and claim audit 0 issues
+on 600 companies; a 100-claim precision audit 100/100 supported with **0 wrong-company
+publications**; evidence spans verbatim on re-fetch (accounts 4,469/4,469 in both JSON and XML;
+external claims 99.7% of 2,694 spans visible on the live page hours later, 99.3% inside one text
+node); a 35-company wrong-company red team 0 false positives; the same batch run twice gives 0
+duplicates, 0 change events and identical claims; a forced hard deadline still writes every envelope,
+summary and the viewer; 1,500-company runtime projected at 1,119–1,185 s from three live sets (an
+earlier v5 build completed a real 1,200-company run in 553 s with 0.9 GB peak memory).
 
 One question, if you have a moment: which shape do you read for dated news and hiring (the claims,
 `external.observations`, `external.company_site`, or the kit profile's `pages`)? Every shape carries

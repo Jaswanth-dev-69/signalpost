@@ -309,7 +309,7 @@ strictly comparable with round 2 (3.80).
   period; "registered at the start" in the timeline; collapsible filters and sticky search on phones;
   evidence as stacked cards on phones; a unit test parses the viewer script with node.
 
-### Final push gate (code `5f688f9`)
+### Push gate (code `5f688f9`)
 
 | Check | Result |
 |---|---|
@@ -328,20 +328,125 @@ Coverage (companies/facts) on the final live runs: sample-100 website 71/71, soc
 33/376, hiring 20/24; proxy-200 44/44, 21/41, 21/251, 16/17; set-300 83/83, 45/86, 31/339, 16/38
 (within ±2 companies of the earlier v5 runs; the crawl noise floor).
 
-## Packaging (15 Oct 2026)
+### Blind review rounds 4 and 5 (absolute grading, 20 companies each)
 
-- Agent code of v5: `5f688f9bc312e5251a0588f41d65edc2fc00a923` (pushed).
-- Cold-cache fresh clone of `5f688f9` from GitHub into an empty directory with an empty
+- Round 4 (code `5f688f9`): summaries **4.05/5**, viewer **4/5**; compare on desktop 3/5 because group
+  and parent figures were mixed in one column and amounts carried no currency.
+- Round 5 (code `e292fcd`): summaries **3.85/5**, viewer **4/5** (about 9/12 and 6–6.5/8 if graded
+  that strictly). Remaining points: the brief named a weaker change before a stronger one, "rose
+  sharply" for a smaller loss, unknowns that repeat what the accounts cannot say, stale news shown as
+  a change, event posts as news, "names the company" for a menu label, compare amounts hard to read,
+  search missing English terms, and the mobile section bar.
+
+### S/U round 6 (`9b589dd`, after review round 5)
+
+- Brief: the most material change by priority (rename > result swing > large result move > revenue
+  move ≥ 30% > chief executive > board), and negative equity is always flagged next to it.
+- Results: a loss narrows or widens and a profit rises or falls ("more than doubled/tripled" only when
+  strictly true); financial items carry their year; partnerships (DA, ANS, KS) and sole proprietors
+  are not said to pay tax; first accounts that start on the founding day are recognised (a 0-day gap
+  was read as unknown before) and a 15-month first period is not called "only".
+- What changed: news older than twelve months is not a change and Recent activity says none is from
+  the last twelve months; conference, fair, webinar, seminar and investor-day posts are not business
+  news; parent-company movements are kept unless the group has its own year-on-year figures.
+- Unknowns: holding companies name the unknown shareholdings; an operating-result fall or the
+  financial-cost total is named instead of a generic "what caused the loss"; the hiring unknown only
+  for employers or companies with a website.
+- Website identity is stated only from the register's homepage field, the organisation number or a
+  distinctive part of the company's own name on the page.
+- Viewer: search also covers the English activity terms and digit-only industry codes, terms of up to
+  three letters match at word starts; compare starts with what the company does and the finances,
+  amounts shortened with the currency (full figure on hover and in the CSV), a second Close at the
+  bottom; on phones the section links are one scrolling row, only the search box stays on screen, and
+  a section link scrolls within the profile (it used to change the address and return to the list);
+  old news is noted.
+- Checks (offline from the `vf` profiles, 600 companies): schema 0, claim audit 0, summaries 600/600
+  traceable, regression guard clean against `e292fcd`; headless viewer checks pass on all three sets
+  and on a 1,200-company build (13.4 MB, ready in 0.6 s desktop / 0.45 s phone).
+
+### Evidence fix (`a336bf8`)
+
+The external-span census of the `e292fcd` gate (set-300, 2,689 spans re-fetched) found 24 spans not in
+one node of the live page (99.1%; 99.5% visible). Most were pages that changed between the run and the
+re-fetch or listing spans that cross nodes, but four social-profile spans were the normalised URL
+(`https://linkedin.com/company/forsvarer`) where the page prints `https://www.linkedin.com/company/forsvarer`:
+links named only in a page's structured data (`sameAs`) took the normalised URL as their span since
+Phase 2 (4 Oct). They are now quoted exactly as printed (plain or with JSON-escaped slashes), and a
+link the page does not print verbatim is not published. Live check on the three affected companies:
+8/8 social spans and 51/51 spans verbatim on re-fetch; claim values unchanged.
+
+### Final blind review (fresh reviewer, v2 vs new, 40 companies: 20 sample-100 + 20 set-300, labels randomized; code `9b589dd` on the 15 Oct live profiles)
+
+| | v2 style (single paragraph) | new style (labelled sections) |
+|---|---|---|
+| does / changed / unknowns / sources / no unsupported claims / useful | 2.08 / 1.00 / 1.85 / 2.00 / 3.25 / 1.85 | 4.05 / 4.92 / 4.55 / 5.00 / 4.47 / 4.47 |
+| overall level (1–5) | 1.85 | **4.70** (28 fives, 12 fours) |
+| preferred | 0 | **40 of 40** |
+
+Viewer: new **5/5** (find desktop 5, find mobile 5, compare desktop 5, compare mobile 4, verify desktop 5,
+verify mobile 5); v2 viewer 2/5 (no compare). New is at least as good as v2 on every criterion.
+
+### S/U round 7 (`c9f2049`, the reviewer's flagged sentences)
+
+What changed names only business news (contracts, launches, results, appointments) and says so;
+event invitations are not news; losses deepen or narrow (not "reduced" when the costs deepened a
+loss); the unknown explains the larger movement (financial costs of NOK 5.4 million rather than a
+NOK 33 thousand operating move); owners named on the company's own site are not listed as unknown;
+slider buttons ("Forrige Neste") trimmed from the site's text, which is quoted as what the site
+says rather than as a description; glossary fixed where it misread the text (import ≠ import/export,
+arbeidstrening ≠ sports, medical equipment ≠ medical services, surveillance products ≠ security
+services; printing, commercial property, food products, supplements, batteries and EV charging
+added); "at least 20 dated news items" instead of "publishes news regularly"; no second sentence with
+the same figures; a former name that ends before the founding date is explained; a twelve-month
+year that is not a calendar year is a financial year, a 352-day first year is a period. Also: a zero
+result is a result of NOK 0, never a profit, and a swing needs a real change of sign; the brief's
+group figures use the group's currency; phone compare cards show full amounts.
+
+### Final push gate (code `a336bf8`; summary and viewer changes to `c9f2049`)
+
+| Check | Result |
+|---|---|
+| Unit tests | 213 pass on a clean `git archive` of `c9f2049` |
+| Live runs `vf2` (code `a336bf8`, 15 Oct) on sample-100, proxy-200, set-300 | exit 0; schema 0, claim audit 0, summaries 600/600 traceable |
+| Offline rebuild of those 600 profiles with `c9f2049` | schema 0, claim audit 0, summaries 600/600 traceable; regression guard clean against `a336bf8` (no claim, evidence or other field changed) |
+| Regression guard `e292fcd` → `a336bf8` on the live profiles | clean |
+| precision_audit (100 claims, sample-100) | 100/100 supported, **0 wrong-company**, web spans 18/18 |
+| evidence_audit (100 claims, proxy-200) | spans 100% verbatim of loaded pages |
+| External span census, set-300 (2,694 spans re-fetched) | 99.3% in one node, 99.7% visible (99.1% / 99.5% before the `sameAs` fix); social spans 84/84 on sample-100 |
+| Red team | 0/35 |
+| Determinism pair (`detf2`, proxy-200) | 0 duplicates, 0 change events, refresh 0 material, non-summary claims identical 200/200 |
+| Viewer, headless Chrome | 0 errors, all find/compare/verify/mobile checks pass on the three sets and on a 1,200-company build (13.4 MB; ready in 0.6 s desktop, 0.45 s phone) |
+| Runtime, 1,500 projection | 1,119 s (proxy-200), 1,185 s (sample-100), 1,165 s (set-300); hard deadline 1,500 s |
+
+Coverage (companies/facts) on `vf2`: sample-100 website 71/71, social 40/84, news 32/373, hiring 20/24;
+proxy-200 44/44, 21/41, 22/271, 16/17; set-300 81/81, 46/88, 31/339, 15/37. Against the run four
+hours earlier (`vf`, code `e292fcd`) sample-100 and proxy-200 are identical; set-300 lost two websites
+to the live web (one site failed to load, one site's contact page did not show the organisation
+number this time, so the identity gate withheld it), within the ±2 noise floor. For companies verified
+in both runs: 213 social profiles the same, 0 lost, 0 gained, 6 spans now quoted as printed.
+
+Known residual (unchanged since earlier versions): a homepage that prints no text at all (a script-
+rendered site whose register-listed domain carries the legal name) has its URL as the website span;
+1 of 71 verified websites on sample-100.
+
+## Packaging (15 Oct 2026, final)
+
+- Agent code of v5: `c9f2049e25dd7ed3e6d64f6ae5ad2e31e081378e` (pushed; `5f688f9` was the previous
+  packaged code, `bea4bcb` its smoke-test commit).
+- Cold-cache fresh clone of `c9f2049` from GitHub into an empty directory with an empty
   `UV_CACHE_DIR` and no virtualenv: `uv sync` exit 0 (3 s), the one command on the 100-company smoke
-  list exit 0 in 259 s, 100/100 envelopes, schema validator 0 errors, summaries 100/100 traceable,
-  claim audit 0 issues, precision audit 100/100 with 0 wrong-company. `docs/smoke-test/` regenerated
-  from that run (README, envelopes, report, input list and `smoke-viewer.html`).
-- Submission commit: the `main` commit that carries that smoke test (docs only on top of `5f688f9`).
+  list exit 0 in 251 s, 100/100 envelopes, schema validator 0 errors, summaries 100/100 traceable,
+  claim audit 0 issues, precision audit 100/100 with 0 wrong-company (web spans 13/13), headless viewer
+  checks pass. Same published facts as the `5f688f9` smoke run (website 8, social 2, dated news 3; the
+  list is web-sparse). `docs/smoke-test/` regenerated from that run (README, envelopes, report, input
+  list and `smoke-viewer.html`).
+- Submission commit: the `main` commit that carries that smoke test (docs only on top of `c9f2049`).
   Email draft `docs/V5_EMAIL.md` (hash and contact as placeholders); a filled copy is kept outside the
   repository. Nothing has been sent.
 
-## Status (15 Oct 2026)
+## Status (15 Oct 2026, final)
 
-- WS-A, WS-B, five S/U rounds and WS-C are on `main` with their gates.
+- WS-A, WS-B, seven S/U rounds, the evidence fix and WS-C are on `main` with their gates. Final blind
+  review: summaries 4.70/5 against v2's 1.85 (preferred 40/40), viewer 5/5 against 2/5.
 - Not established: whether our news and hiring items now match Builderr's verified pool (only their
   scorer can show it). Website and social coverage are unchanged by design (identity gate untouched).
