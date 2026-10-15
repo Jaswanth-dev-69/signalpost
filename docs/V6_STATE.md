@@ -152,3 +152,26 @@ Of Builderr's 16 kit news facts, v6 matches 9 exactly; of the other 7, 3 are sit
 | set-1500 (`eval/fixture_proxy.py`, seed 20261015, 43% register homepages) | exit 0, **721 s wall** (pass 1 95 s, web pass ends 686 s), 1,500/1,500 envelopes, 0 tracebacks, 0 deadline notes, peak RSS **1.00 GB**; 18,936 requests, p50 208 ms, p95 2.5 s, HTTP 429 web 11, registry 0; schema 0, claim audit 0, summaries 1,500/1,500 traceable |
 | Viewer, 1,500 companies | 16.7 MB; ready 0.65 s desktop, 0.54 s phone; all headless checks pass |
 | Forced hard deadline (`--hard-deadline 75`, set-300) | exit 0 in 46 s, 300/300 envelopes, peak RSS 0.21 GB |
+
+## Packaging (15 Oct 2026)
+
+- Agent code of v6: `aba41ad` (pushed); main `0ca604247e4a8f941d2e6f0cb2f393d3b6c2b55d` = that code plus
+  docs.
+- Cold-cache fresh clone of **`0ca604247e4a8f941d2e6f0cb2f393d3b6c2b55d`** from GitHub into an empty
+  directory with an empty `UV_CACHE_DIR` and no virtualenv: `uv sync` exit 0 (2 s), the one command on
+  the 100-company smoke list **exit 0** in 262 s, **100/100 envelopes**, **schema validator 0 errors**,
+  summaries 100/100 traceable, claim audit 0 issues, precision audit 100/100 with 0 wrong-company
+  (web spans 12/12), headless viewer checks pass; same published facts as the v5 smoke run (website 8,
+  social 2, dated news 3; web-sparse list), kit-read news companies 1 → 2. `docs/smoke-test/`
+  regenerated from this run and cites v6 and this hash.
+- Submission commit: the `main` commit that carries that smoke test (docs only on top of `0ca6042`).
+  Nothing has been sent and no v6 tag exists.
+
+## Status (15 Oct 2026, evening)
+
+- Built: L1 + L2 (kit-read company-site news), gated on three sets and at 1,500 companies.
+- Sized and rejected or not permitted: Norid, Finanstilsynet, Newsweb, Arbeidstilsynet, DiBK,
+  announcements, datetime precision, second domains, careers pages in the kit profile, fact depth.
+- Unchanged by design: websites, social profiles and every claim (identity gate untouched).
+- Not established: which read path Builderr's scorer uses for news and hiring; v6 helps only if it
+  includes kit-read company-site news, and is equal to v5 otherwise.

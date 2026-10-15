@@ -1,13 +1,13 @@
-# 100-company smoke test (v5)
+# 100-company smoke test (v6)
 
-Clean-clone run of **v5, commit `be92b6c85d0eaf3f78ec573944dedc4872d1d7eb`** (agent code identical to `c9f2049`; later commits change only `docs/`), cloned from
+Clean-clone run of **v6, commit `0ca604247e4a8f941d2e6f0cb2f393d3b6c2b55d`** (the agent code of this revision; later commits change only `docs/`), cloned from
 https://github.com/Jaswanth-dev-69/signalpost into an empty directory with an empty package cache
 (`UV_CACHE_DIR` pointing at a new empty directory) and no virtualenv. Only the declared install step,
 then the one command:
 
 ```bash
 uv sync
-uv run python run_agent.py --organisations docs/smoke-test/smoke-companies.jsonl --output out/smoke-envelopes.jsonl --bulk brreg-enheter.csv.gz --run-id smoke-v5
+uv run python run_agent.py --organisations docs/smoke-test/smoke-companies.jsonl --output out/smoke-envelopes.jsonl --bulk brreg-enheter.csv.gz --run-id smoke-v6
 ```
 
 `--bulk` pointed at a local copy of the Brønnøysundregistrene bulk snapshot; without it the agent
@@ -17,15 +17,15 @@ homepage.
 
 | Check | Result |
 |---|---|
-| Install | `uv sync` exit 0 in 3 s with an empty cache |
-| Run | exit 0 in 261 s wall (258.9 s inside the agent) |
+| Install | `uv sync` exit 0 in 2 s with an empty cache |
+| Run | exit 0 in 262 s wall (260.3 s inside the agent) |
 | Envelopes | 100/100; unique True, input order preserved True, zero silent drops True, all terminal True; schema validator 0 errors |
 | Website module states | {'not_found': 89, 'complete': 10, 'blocked_policy': 1} |
 | Claims | 2,194 available, 703 not_available, 10 ambiguous, 5 blocked; 0 non-available claims carrying a value |
 | Companies with a published fact | website 8, social 2, dated news 3, hiring 0 |
 | Hedge records (`external.observations`) | 34 kit observation records, one per published news item, careers page or posting |
 | Summaries | 100/100 envelopes open with `summary` (also the first claim); every sentence traces to a published claim (`eval/synthesis_validator.py`) |
-| Requests | 860; p50 203 ms, p95 2043 ms; HTTP 429 web 0, registry 0; third-party cost 0 |
+| Requests | 868; p50 196 ms, p95 1831 ms; HTTP 429 web 0, registry 0; third-party cost 0 |
 | NAV vacancy index | complete True (13525 active ads) |
 
 Files: `smoke-companies.jsonl` (input), `smoke-envelopes.jsonl.gz` (the 100 envelopes),
