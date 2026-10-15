@@ -154,12 +154,22 @@ LEGAL_FORMS = {
     "PK": "pension fund",
     "SAM": "co-ownership",
     "KBO": "bankruptcy estate",
-    "TVAM": "entity under compulsory dissolution",
-    "PRE": "partnership company",
+    "TVAM": "entity compulsorily registered for VAT",
+    "PRE": "joint shipowning partnership",
     "KOMM": "municipality",
     "FYLK": "county authority",
     "STAT": "state body",
     "ORGL": "organisational unit",
+    "VPFO": "securities fund",
+    "SÆR": "company established under special legislation",
+    "ANNA": "legal entity of another kind",
+    "BBL": "housing building association",
+    "SE": "European company",
+    "KIRK": "unit of the Church of Norway",
+    "EOFG": "European economic interest grouping",
+    "KTRF": "office community",
+    "ADOS": "public administrative unit",
+    "OPMV": "separately registered VAT unit",
 }
 SOURCE_LABELS = {
     "official_registry_live": "Enhetsregisteret entity record (Brønnøysund Register Centre)",
@@ -327,14 +337,16 @@ PLACEHOLDER_TITLES = {"hello world!", "hello world", "hei, verden!", "hei verden
                       "sample page", "eksempelside", "untitled", "uten tittel", "ny side", "new page"}
 MATERIAL_NEWS = re.compile(r"avtale|kontrakt|oppdrag|tildel|signer|lanser|launch|åpner|etabler|kjøper|oppkjøp|fusjon|investe|"
                            r"resultat|kvartal|årsrapport|årsregnskap|daglig leder|administrerende|ansetter|utvider|vinner|award|"
-                           r"partner|contract|agreement|acquisition|quarter|results|appoint|opens|expands|wins", re.I)
+                           r"partner|contract|agreement|acquisition|quarter|results|appoint|opens|expands|wins|introduser|introduc|"
+                           r"\bny (\w+)?(direktør|sjef|leder)\b", re.I)
 SEASONAL_NEWS = re.compile(r"god sommer|god jul|godt nytt|sommerstengt|påske|winter is coming|åpningstid|stengt|ferie|helg|"
                            r"konferanse|conference|\bmesse\b|webinar|seminar|investor day|\bshow 20|meet us|\bmeet [\w-]+ at\b|møt oss|"
                            r"merry christmas|happy new year|happy holidays|julebord|sommerfest", re.I)
 JUNK_TITLE = re.compile(r"lorem ipsum|^test\b|testpost|^alle (børs|presse|nyhet|artikl|meldinger)|arkiv|archive|"
                         r"^hvorfor bruker vi det|^hvor kommer det fra|^hva er lorem|^hvor kan jeg få", re.I)
-HOLDING_TEXT = re.compile(r"investering|eie (og forvalte )?aksjer|eierskap|aksjer og andeler|aksjer, andeler|kjøp og salg av aksjer|"
-                          r"(deltakelse|delta|deltagelse) i andre (selskap|virksomhet|foretak)|holding", re.I)
+HOLDING_TEXT = re.compile(r"eie (og forvalte )?aksjer|eierskap|aksjer og andeler|aksjer, andeler|kjøp og salg av aksjer|"
+                          r"(deltakelse|delta|deltagelse) i andre (selskap|virksomhet|foretak)|holding|"
+                          r"invest\w* i (verdipapirer og |aksjer og )?(aksjer|andeler|andre (selskap|foretak|virksomhet))", re.I)
 PROPERTY_TEXT = re.compile(r"(utleie|kjøp og salg|forvaltning|drift|utvikling|eie) av (egen |fast )?(fast )?eiendom|eiendomsdrift|eiendomsutvikling|utleie av bolig", re.I)
 # English for common terms in Norwegian activity texts (a reader aid: the original text is quoted next to it).
 ACTIVITY_TERMS = (
@@ -364,6 +376,13 @@ ACTIVITY_TERMS = (
     (r"møbler|interiør", "furniture/interiors"), (r"\bdyr\b|veterinær", "animals/veterinary"),
     (r"næringsbygg|forretningsbygg|kontorbygg|næringslokal|utleie av lokaler", "real estate"), (r"trykkeri|trykking|grafisk produksjon", "printing"),
     (r"kosttilskudd", "dietary supplements"), (r"batteri", "batteries"), (r"ladestasjon|ladestolpe|ladeutstyr|ladeinfrastruktur|lading av elbil", "EV charging"),
+    # "Investering" alone is investment in general; what it is invested in decides the term (shares and
+    # other companies: HOLDING_TEXT; securities; real estate), and "investeringstjenester" are services.
+    (r"investeringstjeneste", "investment services"), (r"invest\w* i (verdipapir|finansielle instrument)", "securities"),
+    (r"invest\w* i (og drift av |og utvikling av )?(egen |fast )?eiendom|eiendomsinvest", "real estate"), (r"investering|investerer|investere\b", "investment"),
+    (r"kombinasjonsfond|aksjefond|rentefond|indeksfond|obligasjonsfond|pengemarkedsfond|verdipapirfond|hedgefond", "securities fund"),
+    (r"kapitalforvaltning|formuesforvaltning|fondsforvaltning|forvaltning av (verdipapir|fond|kapital|formue)", "asset management"), (r"forvaltning", "management"),
+    (r"\bbank(?!ett)|sparebank", "banking"), (r"hjelpemid", "assistive devices"), (r"\bdata\w{0,2}behandling|\bdata-? ?utstyr|\bdatamaskin", "IT"),
 )
 HOUSING_FORMS = {"BRL", "ESEK", "SAM"}
 PASS_THROUGH_FORMS = {"DA", "ANS", "KS", "ENK", "IS"}  # taxed through the owners, not as an entity
@@ -584,7 +603,8 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
 
     # Shared facts --------------------------------------------------------------------------------
     form = value("legal_form")
-    form_text = f"a {LEGAL_FORMS[form]} ({form})" if form in LEGAL_FORMS else (f"an entity of legal form {form}" if form else "a registered entity")
+    article = "an" if form in LEGAL_FORMS and LEGAL_FORMS[form][:1] in "aeioAEIO" and not LEGAL_FORMS[form].startswith("Eu") else "a"
+    form_text = f"{article} {LEGAL_FORMS[form]} ({form})" if form in LEGAL_FORMS else (f"an entity of legal form {form}" if form else "a registered entity")
     muni = value("municipality")
     founded = str(value("founded_date") or "")
     code, label = value("industry_code"), value("industry_label")
@@ -655,7 +675,8 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                 return ""
             return f" (until {until}, before the founding date in the register)" if founded and until < founded[:10] else f" (until {until})"
         listed = "; ".join(_clean_name(f.get("name")) + until_text(f) for f in former[:8])
-        status_sentences.append((f"Earlier names in the register: {listed}", available("former_names")))
+        if not (len(former) == 1 and recent(str(former[0].get("until") or ""))):  # a single recent rename is told under What changed
+            status_sentences.append((f"Earlier names in the register: {listed}", available("former_names")))
     section("identity", "Company", [(identity, [c for c in (first("organisation_number"), *available("legal_form"), *available("municipality"), *available("founded_date")) if c]), *status_sentences])
 
     # 2. What it does -----------------------------------------------------------------------------
@@ -673,7 +694,8 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         shown = SLIDER_WORDS.sub("", description)
         does.append((f"Its verified website says {_quote(shown if len(shown) >= 30 else description)}", available("company_description")))
     if not activity and not description:
-        unknowns.append(("what the company does beyond its industry code (no registered activity text or verified website description)", None))
+        unknowns.append(("what the company does beyond its industry code (no registered activity text or verified website description)",
+                         [first("registered_activity")] if first("registered_activity") else industry_claims[:1] or None))
     section("activity", "What it does", does)
 
     # 3. Size and finances --------------------------------------------------------------------------
@@ -750,7 +772,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         if fin_state == "not_applicable":
             unknowns.append(("annual accounts (this legal form is not required to file them)", [first("revenue")] if first("revenue") else None))
         elif fin_state in ("failed", "blocked"):
-            unknowns.append(("annual accounts (the accounts register could not be read in this run)", [first("revenue")] if first("revenue") else None))
+            unknowns.append(("annual accounts (the accounts register did not return them when this profile was compiled)", [first("revenue")] if first("revenue") else None))
         else:
             reason = obligation.get("reason") if isinstance(obligation, dict) else None
             unknowns.append(("annual accounts (none returned by Regnskapsregisteret" + (f"; {reason.rstrip('.')}" if reason else "") + "); missing figures are not zero",
@@ -897,7 +919,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     if notable and str(notable.get("published_at"))[:10] < stale_cut:
         notable = None
     if notable:
-        what = "The newest business news item on its website (about a contract, launch, result, appointment or similar)"
+        what = "The newest business news item on its website"
         changed.append((f"{what} is {_quote(notable.get('title') or notable.get('value'), 140)} ({str(notable.get('published_at'))[:10]})", [notable]))
     refresh = envelope.get("refresh") or {}
     changes = envelope.get("changes") or []
@@ -944,17 +966,23 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                 parts.append(f"{len(holders)} {_role_label(role_code, norwegian, len(holders))}")
         people.append((f"The register lists {len(roles)} active role{'s' if len(roles) != 1 else ''}: {'; '.join(parts)}", available("registered_roles")))
     elif state("registered_roles") in ("available", "not_available"):
-        unknowns.append(("leadership (no active role holders are registered)", [first("registered_roles")] if first("registered_roles") else None))
+        none_listed = "The register lists no active role holders for it: no chief executive (daglig leder) and no board"
+        people.append((none_listed, [first("registered_roles")] if first("registered_roles") else None))
+        if form in OWNED_FORMS:
+            material.append((3, none_listed, [first("registered_roles")] if first("registered_roles") else None))
     else:
-        unknowns.append(("leadership (the roles register could not be read in this run)", None))
+        unknowns.append(("leadership (the roles register did not return the roles when this profile was compiled)", None))
     subunits = value("registered_subunits") or []
     if subunits:
-        places = []
+        staff: dict[str, float] = {}  # registered employees per municipality: the largest are named first
         for unit in subunits:
             place = _place(((unit.get("address") or {}) if isinstance(unit, dict) else {}).get("kommune") or "")
-            if place and place not in places:
-                places.append(place)
-        where = f" in {_join(places[:4])}" + (f" and {len(places) - 4} other municipalities" if len(places) > 4 else "") if places else ""
+            if place:
+                staff[place] = staff.get(place, 0) + (_number(unit.get("employees")) or 0)
+        places = sorted(staff, key=lambda p: -staff[p])
+        by_size = len(places) > 1 and any(staff.values())
+        where = f" in {_join(places[:4])}" + (f" and {len(places) - 4} other municipalities" if len(places) > 4 else "") \
+            + (" (named by registered employees, largest first)" if by_size and len(places) > 4 else "") if places else ""
         people.append((f"It has {len(subunits)} registered sub-unit{'s' if len(subunits) != 1 else ''} (establishment{'s' if len(subunits) != 1 else ''}){where}", available("registered_subunits")))
     section("people", "Leadership and locations", people)
 
@@ -984,7 +1012,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
             unknowns.append(("the official website (a candidate site was found but could not be confirmed as this exact legal entity, so nothing from it is published)", web_claim,
                              "candidate website, not confirmed as this entity"))
         elif web_state in ("blocked", "failed"):
-            unknowns.append((f"the official website (the site could not be read in this run: {web_state})", web_claim))
+            unknowns.append(("the official website (the site " + ("did not allow it to be read" if web_state == "blocked" else "could not be reached") + " when this profile was compiled)", web_claim))
         elif form not in HOUSING_FORMS:
             unknowns.append(("an official website (none is registered or could be verified)", web_claim))
     section("online", "Online presence", online)
@@ -992,8 +1020,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     # 7. Hiring -----------------------------------------------------------------------------------------
     hiring: list[tuple[str, Any]] = []
     if pages:
-        says_none = any(c.get("openings_listed") is False for c in pages)
-        hiring.append((f"It has a careers page, {pages[0].get('value')}" + ("; the page says there are no open positions at the moment" if says_none else ""), pages[:1]))
+        hiring.append((f"It has a careers page, {pages[0].get('value')}", pages[:1]))
     if postings:
         dated = sorted(postings, key=lambda c: str(c.get("posted_date") or ""), reverse=True)
         top = dated[0]
@@ -1013,7 +1040,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         stamps = [str(c.get("published_at"))[:10] for c in news]
         span_text = f"from {stamps[-1]} to {stamps[0]}" if stamps[-1] != stamps[0] else f"dated {stamps[0]}"
         if len(news) >= MAX_NEWS:
-            activity_sentences.append((f"Its website has at least {MAX_NEWS} dated news items; the {MAX_NEWS} most recent run {span_text}", news[:1] + news[-1:]))
+            activity_sentences.append((f"Its website has at least {MAX_NEWS} dated news items; the {MAX_NEWS} most recent are {'dated ' + span_text if span_text.startswith('from') else 'all ' + span_text}", news[:1] + news[-1:]))
         else:
             activity_sentences.append((f"Its website has {len(news)} dated news item{'s' if len(news) != 1 else ''} {span_text}", news[:1] + news[-1:]))
         if stale_cut and stamps[0] < stale_cut:
@@ -1022,7 +1049,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         others = sorted(others, key=lambda c: (not MATERIAL_NEWS.search(str(c.get("title") or "")), [-ord(ch) for ch in str(c.get("published_at"))[:10]]))[:2]
         if others:
             headlines = "; ".join(f"{_quote(c.get('title') or c.get('value'), 90)} ({str(c.get('published_at'))[:10]})" for c in others)
-            activity_sentences.append((f"Other items include {headlines}", others))
+            activity_sentences.append((f"Among them: {headlines}", others))
     elif site and junk_news:
         unknowns.append(("dated news (its website shows only template or test posts, or pages stamped with the current date)", junk_news[:1]))
     elif site:
@@ -1080,7 +1107,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         if group_latest.get("annual_result") is not None:
             sentence += f", with {_kind_pl('annual', group_latest['annual_result'], gc)}"
         if latest["revenue"] is not None:
-            sentence += f"; the parent company's own revenue was {_money(latest['revenue'], currency)}"
+            sentence += f"; the parent company's own revenue was {_money(latest['revenue'], currency)}" + (f" in {latest_label}" if latest_label != group_label else "")
         brief.append((sentence, group_years[:2] + available("revenue")))
     elif has_accounts and (latest["revenue"] or 0) > 0:
         whose = "In its own (parent-company) accounts, revenue" if parent_only else "Revenue"
@@ -1129,8 +1156,13 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     # 9. What is not known, stated as such ------------------------------------------------------------
     if unknowns:
         texts, refs, ids = [], [], []
+        said: set[str] = set()
         for i, item in enumerate(unknowns):
             text, cited = item[0], item[1]
+            for note in (" (the accounts give the figures, not the reasons)",):
+                if note in text:  # the note is given once, with the first item it applies to
+                    text = text.replace(note, "") if note in said else text
+                    said.add(note)
             marker, s_refs, s_ids = sources.cite([c for c in (cited or []) if c], label=item[2] if len(item) > 2 else None)
             texts.append((text[:1].upper() + text[1:] if i == 0 else text) + marker)
             refs.extend(r for r in s_refs if r not in refs)

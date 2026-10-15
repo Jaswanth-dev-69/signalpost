@@ -135,3 +135,127 @@ class SingleNodeDescriptions(unittest.TestCase):
         self.assertEqual(_company_description(web_val, "https://www.example.no/")[1], "https://www.example.no/")
         web_val["lead_paragraph"] = ""
         self.assertEqual(_company_description(web_val, "https://www.example.no/"), (None, None))
+
+
+class BlindReviewRound7(unittest.TestCase):
+    """Deterministic fixes from the round-7 blind review: faithful activity terms, legal-form names, the
+    parent's year next to group figures, only quoted hiring facts, reader wording, no repeats."""
+
+    def env_with(self, *claims: dict, accounts: list[dict] | None = None) -> dict:
+        from test_v5 import profile
+        from norway_company_agent.official import normalize_financials
+        p = profile()
+        if accounts is not None:
+            p["evidence"]["financials"]["value"] = normalize_financials(accounts)
+        env = envelope(p)
+        env.setdefault("run", {})["completed_at"] = "2026-10-14T00:00:00Z"
+        fields = {c["field"] for c in claims}
+        env["claims"] = [c for c in env["claims"] if c["field"] not in fields]
+        ev = env["claims"][0]["evidence_ids"]
+        env["claims"] += [{"availability": "available", "evidence_ids": ev, **c} for c in claims]
+        return env
+
+    def text(self, env: dict) -> str:
+        from norway_company_agent.synthesis import envelope_summary
+        return envelope_summary(env)["text"]
+
+    def test_investment_terms_follow_what_is_invested_in(self):
+        from norway_company_agent.synthesis import activity_terms
+        self.assertEqual(activity_terms("Investeringstjenestevirksomhet, samt slik virksomhet som lovlig kan drives i tilknytning til dette."), ["investment services"])
+        self.assertEqual(activity_terms("Investeringer i fast eiendom."), ["real estate"])
+        self.assertEqual(activity_terms("Investering i aksjer og verdipapirer."), ["owning shares in other companies"])
+        self.assertEqual(activity_terms("Investering i verdipapirer og andre selskap og fast eiendom."), ["owning shares in other companies", "real estate"])
+        self.assertEqual(activity_terms("Investeringsvirksomhet og rådgivningsvirksomhet."), ["investment", "consulting"])
+        self.assertEqual(activity_terms("Salg av datatbehandlingstjenester, salg av data- utstyr, systemer og hva dermed står i forbindelse, "
+                                        "samt delta i andre selskaper med økonomisk formål."), ["IT"])
+
+    def test_fund_bank_and_management_texts_get_english_terms(self):
+        from norway_company_agent.synthesis import activity_terms
+        self.assertEqual(activity_terms("Kombinasjonsfond."), ["securities fund"])
+        self.assertEqual(activity_terms("Sparebank."), ["banking"])
+        self.assertEqual(activity_terms("Banken kan utføre alle forretninger som det er vanlig at banker utfører."), ["banking"])
+        self.assertEqual(activity_terms("Forvaltning."), ["management"])
+        self.assertEqual(activity_terms("Forvaltning av fast eiendom."), ["real estate"])
+        self.assertEqual(activity_terms("Kapitalforvaltning."), ["asset management"])
+        self.assertEqual(activity_terms("Agent for tekniske hjelpemidler til funksjonshemmede."), ["assistive devices"])
+
+    def test_investment_services_raise_no_shareholding_unknown(self):
+        text = self.text(self.env_with({"field": "registered_activity", "value": ["Investeringstjenestevirksomhet."]}))
+        self.assertIn("in English, this text mentions investment services", text)
+        self.assertNotIn("owning shares", text)
+        self.assertNotIn("holds shares", text)
+
+    def test_legal_forms_are_named_with_the_right_article(self):
+        from norway_company_agent.synthesis import LEGAL_FORMS
+        self.assertEqual(LEGAL_FORMS["VPFO"], "securities fund")
+        self.assertIn("is a securities fund (VPFO)", self.text(self.env_with({"field": "legal_form", "value": "VPFO"})))
+        self.assertIn("is an association (FLI)", self.text(self.env_with({"field": "legal_form", "value": "FLI"})))
+
+    def test_parent_revenue_names_its_year_when_the_group_year_differs(self):
+        from test_v5 import year
+        accounts = [year(2023, 1000000.0, -50000.0), year(2024, 1200000.0, 20000.0), year(2025, 1500000.0, 90000.0),
+                    year(2024, 9000000.0, 400000.0, "KONSERN")]
+        brief = self.text(self.env_with(accounts=accounts)).split("\n")[0]
+        self.assertIn("The group (konsern) had revenue of NOK 9.0 million in 2024", brief)
+        self.assertIn("the parent company's own revenue was NOK 1.5 million in 2025", brief)
+        same = self.text(self.env_with()).split("\n")[0]
+        self.assertIn("the parent company's own revenue was NOK 1.5 million [", same)
+
+    def test_no_openings_are_not_asserted_without_a_quoted_span(self):
+        page = {"field": "hiring_signal", "value": "https://www.example.no/jobb", "kind": "careers_page", "openings_listed": False}
+        text = self.text(self.env_with(page))
+        self.assertIn("It has a careers page, https://www.example.no/jobb [", text)
+        self.assertNotIn("no open positions", text)
+
+    def test_unreadable_sources_are_described_in_reader_terms(self):
+        env = self.env_with()
+        for claim in env["claims"]:
+            if claim["field"] in ("revenue", "operating_result", "annual_result", "assets", "debt", "reporting_period",
+                                  "financial_history", "group_accounts", "group_financials"):
+                claim.update(availability="failed", value=None)
+        text = self.text(env)
+        self.assertIn("annual accounts (the accounts register did not return them when this profile was compiled)", text)
+        self.assertNotIn("in this run", text)
+
+    def test_subunits_are_named_by_registered_employees(self):
+        units = [{"name": f"AVD {n}", "address": {"kommune": n}, "employees": e}
+                 for n, e in (("ASKER", 5), ("BODØ", 30), ("KINN", 0), ("OSLO", 12), ("TROMSØ", 209), ("BERGEN", 1))]
+        text = self.text(self.env_with({"field": "registered_subunits", "value": units}))
+        self.assertIn("It has 6 registered sub-units (establishments) in Tromsø, Bodø, Oslo and Asker and 2 other municipalities "
+                      "(named by registered employees, largest first)", text)
+
+    def test_no_role_holders_is_stated_as_a_fact(self):
+        env = self.env_with()
+        roles = next(c for c in env["claims"] if c["field"] == "registered_roles")
+        roles.update(availability="not_available", value=None)
+        text = self.text(env)
+        leadership = next(line for line in text.split("\n") if line.startswith("Leadership and locations"))
+        self.assertIn("The register lists no active role holders for it: no chief executive (daglig leder) and no board", leadership)
+        self.assertNotIn("leadership (no active role holders are registered)", text)
+
+    def test_a_recent_rename_is_told_once_outside_the_brief(self):
+        env = self.env_with({"field": "former_names", "value": [{"name": "TESTSELSKAP SØR AS", "until": "2025-11-05"}]})
+        text = self.text(env)
+        self.assertNotIn("Earlier names in the register", text)
+        changed = next(line for line in text.split("\n") if line.startswith("What changed"))
+        self.assertIn("It changed its name on 2025-11-05; it was previously registered as TESTSELSKAP SØR AS", changed)
+
+    def test_launches_and_appointments_are_business_news(self):
+        from norway_company_agent.synthesis import MATERIAL_NEWS
+        self.assertTrue(MATERIAL_NEWS.search("Hjelpemiddelspesialisten introduserer Sensiva.no"))
+        self.assertTrue(MATERIAL_NEWS.search("Jan-Inge Christensen ny finansdirektør"))
+        self.assertTrue(MATERIAL_NEWS.search("Nina Skjersåker – ny leder i Stiftelsen Guts"))
+        self.assertFalse(MATERIAL_NEWS.search("Ny lederstil i hverdagen"))
+
+    def test_viewer_wording_and_tile_arrows(self):
+        from test_v5 import profile
+        from norway_company_agent.synthesis import apply_envelope_summary
+        from norway_company_agent.viewer import build_viewer_html
+        env = envelope(profile())
+        apply_envelope_summary(env)
+        html = build_viewer_html([env], {"run_id": "run-1", "started_at": T, "completed_at": T})
+        self.assertIn("function glue(t,l)", html)
+        self.assertIn(".metric>span{", html)
+        self.assertIn("Identity proof, quoted from its source", html)
+        for jargon in ("' companies · run '", "no earlier run", "in this run", "no openings stated", "since last run"):
+            self.assertNotIn(jargon, html)
