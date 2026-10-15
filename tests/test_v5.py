@@ -405,3 +405,42 @@ class FirstAccounts(unittest.TestCase):
         text = envelope_summary(self.env_for("2001-05-02", self.first_period("2024-07-01", "2024-12-31")))["text"]
         self.assertNotIn("first full accounting year", text)
         self.assertIn("cover periods of different length, so they are not compared", text)
+
+
+class SummaryRound7(unittest.TestCase):
+    """Final blind review: wording that a strict reader would flag."""
+
+    def test_glossary_reads_the_activity_faithfully(self):
+        from norway_company_agent.synthesis import activity_terms
+        self.assertEqual(activity_terms("Import, kjøp, salg og annen omsetning av matprodukter."), ["import", "food"])
+        self.assertEqual(activity_terms("Import og eksport av klær"), ["import/export", "clothing/textiles"])
+        self.assertEqual(activity_terms("Arbeidstrening og kurs for personer utenfor arbeidslivet"), ["work training/job inclusion", "education/training"])
+        self.assertEqual(activity_terms("Kjøp og salg av medisinsk utstyr og diagnostiske reagenser"), ["medical equipment/supplies"])
+        self.assertEqual(activity_terms("Produksjon og salg av sikkerhets- og overvåkingsprodukter"), ["production", "security/surveillance"])
+        self.assertEqual(activity_terms("Trykkeri samt utleie av næringsbygg"), ["printing", "real estate"])
+
+    def test_losses_deepen_or_narrow(self):
+        env = SummaryRound5().env_for([custom_year(2024, 1000000.0, -50000.0, -60000.0, 900000.0, 400000.0),
+                                       custom_year(2025, 1000000.0, -84000.0, -5484000.0, 900000.0, 400000.0)])
+        text = envelope_summary(env)["text"]
+        self.assertIn("In 2025, financial costs and tax of NOK 5.4 million deepened an operating loss of NOK 84 thousand to an annual loss of NOK 5.5 million", text)
+        self.assertIn("what the financial costs and tax of NOK 5.4 million consist of", text)
+        self.assertNotIn("why the operating result fell", text)
+
+    def test_owners_named_by_the_company_are_not_listed_as_unknown(self):
+        env = envelope(profile())
+        ev = env["claims"][0]["evidence_ids"]
+        env["claims"] = [c for c in env["claims"] if c["field"] != "company_description"]
+        env["claims"].append({"field": "company_description", "availability": "available", "evidence_ids": ev,
+                              "value": "Forrige Neste Velkommen til Testselskap Nord. Selskapet eies og drives av Kari Nordmann."})
+        text = envelope_summary(env)["text"]
+        self.assertNotIn("who owns it", text)
+        self.assertIn("Its verified website says “Velkommen til Testselskap Nord.", text)
+        apply_envelope_summary(env)
+        self.assertEqual(validate_synthesis_envelope(env), [])
+
+    def test_a_former_name_before_the_founding_date_is_explained(self):
+        env = envelope(profile())
+        next(c for c in env["claims"] if c["field"] == "former_names")["value"] = [{"name": "TESTSELSKAP NORD SAMEIE", "until": "2010-03-13"}]
+        env["claims"].append({"field": "founded_date", "value": "2012-11-19", "availability": "available", "evidence_ids": env["claims"][0]["evidence_ids"]})
+        self.assertIn("TESTSELSKAP NORD SAMEIE (until 2010-03-13, before the founding date in the register)", envelope_summary(env)["text"])

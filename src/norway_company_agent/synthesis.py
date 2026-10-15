@@ -329,7 +329,7 @@ MATERIAL_NEWS = re.compile(r"avtale|kontrakt|oppdrag|tildel|signer|lanser|launch
                            r"resultat|kvartal|årsrapport|årsregnskap|daglig leder|administrerende|ansetter|utvider|vinner|award|"
                            r"partner|contract|agreement|acquisition|quarter|results|appoint|opens|expands|wins", re.I)
 SEASONAL_NEWS = re.compile(r"god sommer|god jul|godt nytt|sommerstengt|påske|winter is coming|åpningstid|stengt|ferie|helg|"
-                           r"konferanse|conference|\bmesse\b|webinar|seminar|investor day|\bshow 20|"
+                           r"konferanse|conference|\bmesse\b|webinar|seminar|investor day|\bshow 20|meet us|\bmeet [\w-]+ at\b|møt oss|"
                            r"merry christmas|happy new year|happy holidays|julebord|sommerfest", re.I)
 JUNK_TITLE = re.compile(r"lorem ipsum|^test\b|testpost|^alle (børs|presse|nyhet|artikl|meldinger)|arkiv|archive|"
                         r"^hvorfor bruker vi det|^hvor kommer det fra|^hva er lorem|^hvor kan jeg få", re.I)
@@ -338,7 +338,8 @@ HOLDING_TEXT = re.compile(r"investering|eie (og forvalte )?aksjer|eierskap|aksje
 PROPERTY_TEXT = re.compile(r"(utleie|kjøp og salg|forvaltning|drift|utvikling|eie) av (egen |fast )?(fast )?eiendom|eiendomsdrift|eiendomsutvikling|utleie av bolig", re.I)
 # English for common terms in Norwegian activity texts (a reader aid: the original text is quoted next to it).
 ACTIVITY_TERMS = (
-    (r"barnehage", "kindergarten"), (r"tannleg|tannhelse|tannklinikk", "dental care"), (r"\blege(senter|kontor|tjenest|praksis)|\bmedisinsk", "medical services"),
+    (r"barnehage", "kindergarten"), (r"tannleg|tannhelse|tannklinikk", "dental care"), (r"\blege(senter|kontor|tjenest|praksis)|legevakt|medisinske tjenester", "medical services"),
+    (r"medisinsk(e)? (utstyr|produkt|forbruksmateriell|teknisk)|diagnosti|reagens", "medical equipment/supplies"), (r"\bmedisinsk", "medical"),
     (r"fysioterapi", "physiotherapy"), (r"psykolog", "psychology"), (r"frisør", "hairdressing"), (r"hudpleie|skjønnhet|kosmetisk", "beauty care"),
     (r"restaurant|servering|kafé|kafe\b|catering|take-?out", "restaurants/catering"), (r"hotell|overnatting|utleie av hytte", "accommodation"),
     (r"borettslag|boligsameie", "housing cooperative"), (r"eiendom", "real estate"), (r"oppføring av|bygg(e|virksomhet|arbeid)|entrepren", "construction"),
@@ -346,23 +347,29 @@ ACTIVITY_TERMS = (
     (r"grunnarbeid|graving|anleggsarbeid|maskinentrepren", "groundworks"), (r"taxi|drosje", "taxi services"),
     (r"transport|frakt|budtjenest|logistikk|spedisjon", "transport/logistics"), (r"regnskap|bokføring", "accounting"), (r"revisjon", "auditing"),
     (r"konsulent|rådgivning", "consulting"), (r"programvare|software|systemutvikling", "software"), (r"\bit[- ]|informasjonsteknologi|datasystem|ikt\b", "IT"),
-    (r"detaljhandel|butikk|nettbutikk|netthandel", "retail"), (r"\bhandel\b|handelsvirksomhet", "trade"), (r"engros|agentur", "wholesale"), (r"import|eksport", "import/export"),
+    (r"detaljhandel|butikk|nettbutikk|netthandel", "retail"), (r"\bhandel\b|handelsvirksomhet", "trade"), (r"engros|agentur", "wholesale"),
+    (r"import\w* og eksport|eksport\w* og import", "import/export"), (r"\bimport", "import"), (r"eksport", "export"),
     (r"tilvirkning|fabrikasjon|fabrikk|industri", "manufacturing"), (r"produksjon", "production"), (r"landbruk|jordbruk|gårdsdrift|husdyr", "agriculture"),
     (r"skogbruk|skogsdrift|skogsentrepren|tømmer", "forestry"), (r"fiske|havbruk|oppdrett", "fishing/aquaculture"), (r"reklame|markedsføring", "marketing"),
-    (r"undervisning|opplæring|kurs\b|skole", "education/training"), (r"trening|treningssenter|idrett", "sports/fitness"),
+    (r"undervisning|opplæring|kurs\b|skole", "education/training"), (r"arbeidstrening|arbeidsmarkedstiltak|arbeidsinkludering|attføring|tilrettelagt arbeid", "work training/job inclusion"),
+    (r"(?<!arbeids)trening|treningssenter|idrett", "sports/fitness"),
     (r"reiseliv|reisebyrå|turisme|opplevelse", "tourism"), (r"forsikring", "insurance"), (r"utlån|kreditt|finansier", "finance"),
-    (r"renhold|vask\b|rengjøring", "cleaning"), (r"vakthold|sikkerhet", "security services"), (r"bilverksted|bilsalg|kjøretøy|\bbil(er)?\b", "motor vehicles"),
+    (r"renhold|vask\b|rengjøring", "cleaning"), (r"vakthold|vaktselskap|sikkerhetstjenest", "security services"), (r"sikkerhet|overvåking|alarm", "security/surveillance"), (r"bilverksted|bilsalg|kjøretøy|\bbil(er)?\b", "motor vehicles"),
     (r"båt", "boats"), (r"reparasjon|verksted|vedlikehold", "repair/maintenance"), (r"rederi|skipsfart", "shipping"), (r"maritim", "maritime activities"),
     (r"petroleum|olje|naturgass", "oil/gas"), (r"energi|kraftproduksjon|strøm", "energy"), (r"arkitekt", "architecture"),
     (r"ingeniør", "engineering"), (r"advokat|juridisk", "legal services"), (r"helse|omsorg|pleie", "health/care"),
     (r"design", "design"), (r"foto", "photography"), (r"musikk|konsert", "music"), (r"film|tv-produksjon", "film/TV"),
     (r"forlag|utgivelse", "publishing"), (r"utleie av (maskiner|utstyr)", "equipment rental"),
-    (r"matvare|næringsmiddel|\bmat\b", "food"), (r"dagligvare", "groceries"), (r"klær|tekstil", "clothing/textiles"),
+    (r"matvare|matprodukt|næringsmiddel|\bmat\b", "food"), (r"dagligvare", "groceries"), (r"klær|tekstil", "clothing/textiles"),
     (r"møbler|interiør", "furniture/interiors"), (r"\bdyr\b|veterinær", "animals/veterinary"),
+    (r"næringsbygg|forretningsbygg|kontorbygg|næringslokal|utleie av lokaler", "real estate"), (r"trykkeri|trykking|grafisk produksjon", "printing"),
+    (r"kosttilskudd", "dietary supplements"), (r"batteri", "batteries"), (r"ladestasjon|ladestolpe|ladeutstyr|ladeinfrastruktur|lading av elbil", "EV charging"),
 )
 HOUSING_FORMS = {"BRL", "ESEK", "SAM"}
 PASS_THROUGH_FORMS = {"DA", "ANS", "KS", "ENK", "IS"}  # taxed through the owners, not as an entity
 OWNED_FORMS = {"AS", "ASA"}
+OWNER_TEXT = re.compile(r"\b(eies|eid|eiet) (og drives )?av\b|\bowned (and (run|operated) )?by\b", re.I)
+SLIDER_WORDS = re.compile(r"^(?:(?:forrige|neste|previous|next|prev)\s+)+", re.I)
 READABLE_ENTITY = "https://virksomhet.brreg.no/nb/oppslag/enheter/{org}"
 RECENT_DAYS = 730
 INITIAL_ROLE_DAYS = 120
@@ -391,7 +398,7 @@ def _period_label(period: Any) -> str:
     if start[5:] == "01-01" and end[5:] == "12-31" and start[:4] == end[:4]:
         return end[:4]
     if start and end and _comparable(period):
-        return f"the year {start} to {end}"
+        return f"the financial year {start} to {end}" if 364 <= (_days(period) or 0) <= 366 else f"the period {start} to {end}"
     days = _days(period)
     if start and end and days:
         return f"the {max(1, round(days / 30.44))}-month period {start} to {end}"
@@ -616,8 +623,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     # The item named in "What changed": the newest one about the business (contracts, launches,
     # results, appointments) from the last year, else the newest item.
     year_ago = str(run_day - timedelta(days=365)) if run_day else ""
-    notable = next((c for c in real_news if MATERIAL_NEWS.search(str(c.get("title") or "")) and str(c.get("published_at"))[:10] >= year_ago), None) \
-        or (real_news[0] if real_news else None)
+    notable = next((c for c in real_news if MATERIAL_NEWS.search(str(c.get("title") or "")) and str(c.get("published_at"))[:10] >= year_ago), None)
     prev = history[0]["value"] if history else None
     comparable = bool(prev and has_accounts and _comparable(period) and _comparable(prev.get("period")))
     fin_claims = [c for f in fin_fields for c in available(f)] + ([period_claim] if period_claim else [])
@@ -643,7 +649,12 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                 and _clean_name(item.get("name")).casefold() not in {_clean_name(f.get("name")).casefold() for f in former}:
             former.append(item)
     if former:
-        listed = "; ".join(_clean_name(f.get("name")) + (f" (until {str(f.get('until'))[:10]})" if f.get("until") else "") for f in former[:8])
+        def until_text(f: dict[str, Any]) -> str:
+            until = str(f.get("until") or "")[:10]
+            if not until:
+                return ""
+            return f" (until {until}, before the founding date in the register)" if founded and until < founded[:10] else f" (until {until})"
+        listed = "; ".join(_clean_name(f.get("name")) + until_text(f) for f in former[:8])
         status_sentences.append((f"Earlier names in the register: {listed}", available("former_names")))
     section("identity", "Company", [(identity, [c for c in (first("organisation_number"), *available("legal_form"), *available("municipality"), *available("founded_date")) if c]), *status_sentences])
 
@@ -659,7 +670,8 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         does.append((f"Its registered business activity reads, in Norwegian, {_quote(activity)}" + (f"; in English, this text {activity_gloss}" if activity_gloss else ""),
                      available("registered_activity")))
     if description:
-        does.append((f"Its verified website describes it as {_quote(description)}", available("company_description")))
+        shown = SLIDER_WORDS.sub("", description)
+        does.append((f"Its verified website says {_quote(shown if len(shown) >= 30 else description)}", available("company_description")))
     if not activity and not description:
         unknowns.append(("what the company does beyond its industry code (no registered activity text or verified website description)", None))
     section("activity", "What it does", does)
@@ -699,7 +711,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
             op_text = _kind_pl("operating", operating, currency)
             an_text = _kind_pl("annual", annual, currency) if result_noun == "annual result" else \
                 f"a {'loss' if annual < 0 else 'profit' if annual > 0 else 'result'} for the period of {_money(abs(annual), currency)}"
-            verb = "turned" if (operating < 0) != (annual < 0) else ("lifted" if gap > 0 else "reduced")
+            verb = "turned" if (operating < 0) != (annual < 0) else ("lifted" if gap > 0 else "reduced") if operating >= 0 else ("narrowed" if gap > 0 else "deepened")
             link = "into" if verb == "turned" else "to"
             taxless = form in PASS_THROUGH_FORMS
             what = ("Net financial income" if taxless else "Financial income, net of tax,") if gap > 0 else ("Net financial costs" if taxless else "Financial costs and tax")
@@ -776,7 +788,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
                             material.append((3, f"Revenue {'rose' if new > old else 'fell'} {abs((new - old) / old * 100):.0f}% in {latest_label}", cited + available(field)))
                 if field == "annual_result":
                     old_op, new_op = _number(prev.get("operating_result")), latest["operating_result"]
-                    if old_op is not None and new_op is not None and old_op != 0 and abs(new_op - old_op) >= 0.5 * abs(old_op) \
+                    if old_op is not None and new_op is not None and old_op != 0 and abs(new_op - old_op) >= 0.5 * abs(old_op) and (old_op, new_op) != (old, new) \
                             and max(abs(old_op), abs(new_op)) >= small_result:
                         op_change = _change(old_op, new_op, currency, "the parent company's operating result" if group_years else "the operating result",
                                             prev_label, latest_label, result=True, small=small_result)
@@ -885,7 +897,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     if notable and str(notable.get("published_at"))[:10] < stale_cut:
         notable = None
     if notable:
-        what = "The most recent business news on its website" if MATERIAL_NEWS.search(str(notable.get("title") or "")) else "The latest dated item on its website"
+        what = "The newest business news item on its website (about a contract, launch, result, appointment or similar)"
         changed.append((f"{what} is {_quote(notable.get('title') or notable.get('value'), 140)} ({str(notable.get('published_at'))[:10]})", [notable]))
     refresh = envelope.get("refresh") or {}
     changes = envelope.get("changes") or []
@@ -1001,7 +1013,7 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
         stamps = [str(c.get("published_at"))[:10] for c in news]
         span_text = f"from {stamps[-1]} to {stamps[0]}" if stamps[-1] != stamps[0] else f"dated {stamps[0]}"
         if len(news) >= MAX_NEWS:
-            activity_sentences.append((f"Its website publishes news regularly: the {MAX_NEWS} most recent dated items run {span_text}", news[:1] + news[-1:]))
+            activity_sentences.append((f"Its website has at least {MAX_NEWS} dated news items; the {MAX_NEWS} most recent run {span_text}", news[:1] + news[-1:]))
         else:
             activity_sentences.append((f"Its website has {len(news)} dated news item{'s' if len(news) != 1 else ''} {span_text}", news[:1] + news[-1:]))
         if stale_cut and stamps[0] < stale_cut:
@@ -1028,13 +1040,14 @@ def envelope_summary(envelope: dict[str, Any]) -> dict[str, Any]:
     if moves_to_explain:
         unknowns.append((f"what drove {_join(moves_to_explain[:2])} (the accounts give the figures, not the reasons)", available("annual_result") + available("revenue")))
     if has_accounts and (latest["annual_result"] or 0) < -100_000:
-        if op_fall:
+        costs_larger = fin_items_gap is not None and fin_items_gap < 0 and (not op_fall or abs(fin_items_gap) > op_fall[0] - op_fall[1])
+        if op_fall and not costs_larger:
             unknowns.append((f"why the operating result fell from {_pl(op_fall[0], currency)} in {op_fall[2]} to {_pl(op_fall[1], currency)} in {latest_label} (the accounts give the figures, not the reasons)", available("operating_result")))
-        elif fin_items_gap is not None and fin_items_gap < 0:
+        elif costs_larger:
             unknowns.append((f"what the {'net financial costs' if form in PASS_THROUGH_FORMS else 'financial costs and tax'} of {_money(abs(fin_items_gap), currency)} consist of (the accounts give totals only)", available("annual_result")))
         else:
             unknowns.append((f"what caused the loss of {_money(abs(latest['annual_result']), currency)} in {latest_label} (the accounts give the figures, not the reasons)", available("annual_result")))
-    if form in OWNED_FORMS:
+    if form in OWNED_FORMS and not OWNER_TEXT.search(description):
         unknowns.append(("who owns it (not in the sources checked)", None))
     if parent_only:
         unknowns.append(("which companies belong to the group (the accounts give the group's totals, not its members)" if group_latest
