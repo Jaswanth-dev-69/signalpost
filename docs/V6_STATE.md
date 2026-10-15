@@ -50,3 +50,50 @@ is an older proxy (identity, breadth, workforce, reviews, buzz, sentiment), not 
 
 `eval/scorer_mirror.py --kit-news` (new) adds, on both sides, the kit reader's company-site news
 fact. With it the v5 run scores 20.72 on Builderr's sample (news 2/29 companies) instead of 20.07.
+
+## 2. Levers, sized before coding
+
+### 2a. Norid (.no registry): **skipped, not permitted**
+
+Norid's terms for its lookup service (updated 1 April 2025) allow lookups only to resolve technical
+problems, find who is responsible for a domain, contact the subscriber or protect rights; "any and all
+use of the lookup service beyond what is allowed in this document is forbidden", storing or
+transferring significant parts of the data is forbidden "whether the purpose is for commercial use or
+not", and lookups are rate-limited per IP. `rdap.norid.no/robots.txt` is `Disallow: /`, and
+`www.norid.no/robots.txt` disallows the holder and organisation-number lookups. No query pattern for
+verifying company domains is permitted, so it was not sized (`eval/discovery_labelled.py` not run).
+
+### 2b. Other sources and angles (ranked by expected gain per effort)
+
+| # | Hypothesis | Sizing | Verdict |
+|---|---|---|---|
+| L1a | Every news page the news pass checked on a verified site goes into the kit profile's bounded `pages`, also when it yields no dated items (today only with published items) | offline on the 15 Oct runs: kit-read news companies 11 → 18 (sample-100), 12 → 18 (proxy-200), 17 → 23 (set-300); vs Builderr's 16 kit news companies 4 → 7, exact URLs 2 → 5; mirror (`--kit-news`) 20.72 → 21.70 | build |
+| L1b | When no such page is on the kit's news path, the newest published article that is | +5 / 0 / +1 companies; Builderr overlap 7 → 9, exact 5 → 7; mirror → 22.35 | build |
+| L2 | When neither is, the homepage link the kit's own crawl would take (same host, kit term order, then URL) is read once and recorded as a checked news page (kept out of claims) | light live: homepages link such a page for 9 of 48 (sample-100), 4 of 26 (proxy-200), 2 of 57 (set-300) still-uncovered verified sites; 4 Builderr news companies, 2 exact URLs (sample-100) | build |
+| H25 | Finanstilsynet's register of licensed firms (banks, insurers, accountants, agents) | `robots.txt` `Crawl-delay: 10`; one lookup per 10 s makes per-company lookups infeasible inside the run budget; register search page not reachable at the documented path | rejected |
+| H26 | Oslo Børs Newsweb / Euronext company news for listed issuers | Newsweb is a JavaScript-only app (no-browser rule); listed issuers only | rejected |
+| H27 | Arbeidstilsynet registers (cleaning, staffing, car care) | index redirects to an authorisations page; no website or news field, no open data found | not sized further (no field to read) |
+| H28 | DiBK central approval register | no homepage field (v5 H24) | rejected |
+| H29 | Brønnøysund announcements (kunngjøringer) as dated news | official events, not company news; nothing in Builderr's sample pool has that shape | rejected |
+| H30 | Full datetime with offset instead of date-only news timestamps | date-only items 58 / 9 / 77; their pages print only a date (text, date-only `<time>`, listing or URL), so there is nothing richer to read | no gain |
+| H31 | A second verified domain linked from the company's own site (`studix.no` → `studix.com`) | the one known case on sample-100; not sized further | not built (expected below the noise floor) |
+| H32 | Careers page in the kit profile's `pages` | the kit has no company-site hiring reader | rejected |
+
+### 2c. Fact depth on verified sites
+
+Social: inside companies we cover we miss 0 of Builderr's social facts (1 extra). News: Builderr's
+company-site fact is one page per company (kit reader), so more items per company add nothing to it;
+the cap of 20 stays (cap 30 ruled out). Hiring: Builderr's sample has only LinkedIn jobs. No
+measurable gain from more facts per covered company.
+
+### 2d. Shapes
+
+On the 15 Oct v5 runs every `dated_news` claim carries title, direct URL, ISO date and organisation
+number (373/373, 271/271, 339/339), as do the observation records (one proxy record lacks a date
+string) and `external.company_site.posts` (`title`, `url`, `date_published`, `organisation_number`);
+every hiring claim, observation and `company_site.jobs` record carries the organisation number.
+63 news items are still cited by a feed or listing rather than their own article page: live re-check
+shows 32 whose article loads and prints title and date (slow sites that exhausted the per-company web
+budget before the upgrade fetch, v5 H16), 25 not fetchable (robots, errors, off-domain) and 6 whose
+article does not print the feed's title. Their key fields are already complete, so no recall change
+is expected: sized only.
