@@ -346,11 +346,11 @@ JUNK_TITLE = re.compile(r"lorem ipsum|^test\b|testpost|^alle (børs|presse|nyhet
                         r"^hvorfor bruker vi det|^hvor kommer det fra|^hva er lorem|^hvor kan jeg få", re.I)
 HOLDING_TEXT = re.compile(r"eie (og forvalte )?aksjer|eierskap|aksjer og andeler|aksjer, andeler|kjøp og salg av aksjer|"
                           r"(deltakelse|delta|deltagelse) i andre (selskap|virksomhet|foretak)|holding|"
-                          r"invest\w* i (verdipapirer og |aksjer og )?(aksjer|andeler|andre (selskap|foretak|virksomhet))", re.I)
-PROPERTY_TEXT = re.compile(r"(utleie|kjøp og salg|forvaltning|drift|utvikling|eie) av (egen |fast )?(fast )?eiendom|eiendomsdrift|eiendomsutvikling|utleie av bolig", re.I)
+                          r"invest\w* i (verdipapirer og |aksjer og )?(aksjer|andeler|(andre )?(selskap|foretak)|andre virksomhet)", re.I)
+PROPERTY_TEXT = re.compile(r"(utleie|kjøp og salg|forvaltning|drift|utvikling|eie) av (egen |fast )?(fast )?eiendom|eiendomsdrift|eiendomsutvikling|eiendomsforvaltning|utleie av bolig", re.I)
 # English for common terms in Norwegian activity texts (a reader aid: the original text is quoted next to it).
 ACTIVITY_TERMS = (
-    (r"barnehage", "kindergarten"), (r"tannleg|tannhelse|tannklinikk", "dental care"), (r"\blege(senter|kontor|tjenest|praksis)|legevakt|medisinske tjenester", "medical services"),
+    (r"barnehage", "kindergarten"), (r"tannleg|tannhelse|tannklinikk", "dental care"), (r"\blege(senter|kontor|tjenest|praksis|virksomhet)|legevakt|medisinske tjenester", "medical services"),
     (r"medisinsk(e)? (utstyr|produkt|forbruksmateriell|teknisk)|diagnosti|reagens", "medical equipment/supplies"), (r"\bmedisinsk", "medical"),
     (r"fysioterapi", "physiotherapy"), (r"psykolog", "psychology"), (r"frisør", "hairdressing"), (r"hudpleie|skjønnhet|kosmetisk", "beauty care"),
     (r"restaurant|servering|kafé|kafe\b|catering|take-?out", "restaurants/catering"), (r"hotell|overnatting|utleie av hytte", "accommodation"),
@@ -378,12 +378,14 @@ ACTIVITY_TERMS = (
     (r"kosttilskudd", "dietary supplements"), (r"batteri", "batteries"), (r"ladestasjon|ladestolpe|ladeutstyr|ladeinfrastruktur|lading av elbil", "EV charging"),
     # "Investering" alone is investment in general; what it is invested in decides the term (shares and
     # other companies: HOLDING_TEXT; securities; real estate), and "investeringstjenester" are services.
-    (r"investeringstjeneste", "investment services"), (r"invest\w* i (verdipapir|finansielle instrument)", "securities"),
+    (r"investeringstjeneste", "investment services"), (r"invest\w* i (verdipapir|finansielle instrument)|eie (og forvalte )?verdipapir|forvalte verdipapir", "securities"),
     (r"invest\w* i (og drift av |og utvikling av )?(egen |fast )?eiendom|eiendomsinvest", "real estate"), (r"investering|investerer|investere\b", "investment"),
     (r"kombinasjonsfond|aksjefond|rentefond|indeksfond|obligasjonsfond|pengemarkedsfond|verdipapirfond|hedgefond", "securities fund"),
     (r"kapitalforvaltning|formuesforvaltning|fondsforvaltning|forvaltning av (verdipapir|fond|kapital|formue)", "asset management"), (r"forvaltning", "management"),
     (r"\bbank(?!ett)|sparebank", "banking"), (r"hjelpemid", "assistive devices"), (r"\bdata\w{0,2}behandling|\bdata-? ?utstyr|\bdatamaskin", "IT"),
 )
+INVESTMENT_TERMS = {"owning shares in other companies", "securities", "real estate", "investment services"}
+BOILERPLATE_TERMS = {"owning shares in other companies", "investment", "securities"}
 HOUSING_FORMS = {"BRL", "ESEK", "SAM"}
 PASS_THROUGH_FORMS = {"DA", "ANS", "KS", "ENK", "IS"}  # taxed through the owners, not as an entity
 OWNED_FORMS = {"AS", "ASA"}
@@ -450,13 +452,18 @@ def activity_terms(activity: str, form: str | None = None) -> list[str]:
         if any(start < b and end > a for a, b in taken):
             continue  # the longest term at a place wins ("skogsentreprenør" is forestry, not construction)
         taken.append((start, end))
-        if english == "owning shares in other companies" and start > 60 and len(matches) > 1:
+        if english in BOILERPLATE_TERMS and start > 60 and len(matches) > 1:
             continue  # "... herunder delta i andre selskaper" at the end is boilerplate, not the activity
         if form in HOUSING_FORMS and english == "housing cooperative":
             continue
         if english not in [e for _, e in found]:
             found.append((start, english))
-    return [e for _, e in sorted(found)][:3]
+    terms = [e for _, e in sorted(found)]
+    if "investment" in terms and set(terms) & INVESTMENT_TERMS:
+        terms.remove("investment")  # the specific term says what the investment is in
+    if "management" in terms and len(terms) > 1:
+        terms.remove("management")  # a reader aid only where nothing more specific is named
+    return terms[:3]
 
 
 def _kind_pl(kind: str, value: float, currency: str | None, article: str = "an") -> str:

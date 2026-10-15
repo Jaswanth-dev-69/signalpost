@@ -168,6 +168,11 @@ class BlindReviewRound7(unittest.TestCase):
         self.assertEqual(activity_terms("Investeringsvirksomhet og rådgivningsvirksomhet."), ["investment", "consulting"])
         self.assertEqual(activity_terms("Salg av datatbehandlingstjenester, salg av data- utstyr, systemer og hva dermed står i forbindelse, "
                                         "samt delta i andre selskaper med økonomisk formål."), ["IT"])
+        # the general term gives way to the specific one, and an investment clause at the end is boilerplate
+        self.assertEqual(activity_terms("Investeringsselskap, herunder investering i aksjer og andeler i andre selskap."), ["owning shares in other companies"])
+        self.assertEqual(activity_terms("Salg av batterier og elektriske installasjoner til private, firmaer og offentlig sektor. "
+                                        "Drive handel, investere i andre foretak."), ["batteries", "trade"])
+        self.assertEqual(activity_terms("Investering i fast eiendom, deltakelse i samme, eie og forvalte verdipapirer."), ["real estate", "securities"])
 
     def test_fund_bank_and_management_texts_get_english_terms(self):
         from norway_company_agent.synthesis import activity_terms
@@ -176,6 +181,9 @@ class BlindReviewRound7(unittest.TestCase):
         self.assertEqual(activity_terms("Banken kan utføre alle forretninger som det er vanlig at banker utfører."), ["banking"])
         self.assertEqual(activity_terms("Forvaltning."), ["management"])
         self.assertEqual(activity_terms("Forvaltning av fast eiendom."), ["real estate"])
+        self.assertEqual(activity_terms("Utvikling av eiendom, forvaltning og utleie av eiendom."), ["real estate"])
+        self.assertEqual(activity_terms("Eiendomsforvaltning på vegne av andre. Ingeniør- og prosjektledertjenester innen byggeprosjekter."),
+                         ["real estate", "engineering", "construction"])
         self.assertEqual(activity_terms("Kapitalforvaltning."), ["asset management"])
         self.assertEqual(activity_terms("Agent for tekniske hjelpemidler til funksjonshemmede."), ["assistive devices"])
 
