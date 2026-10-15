@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 import extruct
 import tldextract
 import trafilatura
@@ -348,6 +348,33 @@ def _fetch_secondary_page(url: str, *, homepage_domain: str, timeout: float, max
         return None, [], 2, 0, int((time.monotonic() - started) * 1000), f"{type(exc).__name__}: {str(exc)[:120]}"
 
 
+def _lead_paragraph_fix(text: str, soup: BeautifulSoup) -> str | None:
+    """The paragraph the contract would quote from this page's extracted text, checked against the
+    page's own text nodes. None when its evidence span (the first 400 characters) lies inside one text
+    node, as almost all do. Otherwise the whole sentences (40+ characters) of the node where the
+    paragraph starts, or "" when that node holds none: extracted text joins inline elements, so such a
+    paragraph is not verbatim in any single node of the page."""
+    from .contract import BOILERPLATE, _first_paragraph  # late import: contract imports webclaims
+
+    paragraph = _first_paragraph(text)
+    if not paragraph:
+        return None
+    nodes = [" ".join(str(node).split()) for node in soup.find_all(string=True)
+             if not isinstance(node, Comment) and getattr(node.parent, "name", "") not in ("script", "style", "noscript")]
+    if any(" ".join(paragraph[:400].split()) in node for node in nodes):
+        return None
+    head = " ".join(paragraph.split())[:40]
+    holder = next((node for node in nodes if head and head in node), None)
+    if holder is None:
+        return ""
+    tail = holder[holder.find(head):][:600]
+    ends = [m.end() for m in re.finditer(r"[.!?](?=\s|$)", tail) if m.end() >= 40]
+    sentences = tail[:ends[-1]].strip() if ends else ""
+    if not sentences or sentences.count(" ") < 5 or BOILERPLATE.search(sentences):
+        return ""
+    return sentences
+
+
 def _jsonld_organisations(metadata: dict[str, Any]) -> list[dict[str, Any]]:
     values: list[dict[str, Any]] = []
 
@@ -440,6 +467,9 @@ def _fetch_website_once(url: str | None, *, timeout: float = 15.0, max_bytes: in
             "content_sha256": __import__("hashlib").sha256(raw).hexdigest(),
             "extraction_state": _extraction_state(text, soup),
         }
+        lead = _lead_paragraph_fix(text[:5000], soup)
+        if lead is not None:
+            value["lead_paragraph"] = lead
         pages = [{
             "url": final_url,
             "title": title[:500],
@@ -473,6 +503,9 @@ def _fetch_website_once(url: str | None, *, timeout: float = 15.0, max_bytes: in
                 "content_sha256": page["content_sha256"],
                 "retrieved_at": page["retrieved_at"],
             })
+            lead = _lead_paragraph_fix(page_text[:5000], page_soup)
+            if lead is not None:
+                pages[-1]["lead_paragraph"] = lead
             social.extend({**item, "found_on_page": page["url"]} for item in _social_links_raw(page["url"], page_soup))
             subpages.append(page)
         # Organisation numbers printed on the site (footer, contact, privacy pages).

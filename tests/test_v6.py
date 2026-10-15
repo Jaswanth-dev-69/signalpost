@@ -94,3 +94,44 @@ class KitNewsLinkIsNotEvidence(unittest.TestCase):
         sources = {e["source_url"] for e in env["evidence"] if e["id"] in claim["evidence_ids"]}
         self.assertNotIn("https://www.example.no/aktuelt/sak", sources)
         self.assertEqual(kit_news_url(env), "https://www.example.no/aktuelt/sak")
+
+
+class SingleNodeDescriptions(unittest.TestCase):
+    """A description quoted from a page's paragraph must sit inside one text node of that page."""
+
+    def soup(self, body: str):
+        return BeautifulSoup(f"<html><body>{body}</body></html>", "lxml")
+
+    def test_a_paragraph_inside_one_node_is_left_as_it_is(self):
+        from norway_company_agent.website import _lead_paragraph_fix
+        text = "Testselskap Nord leverer ladeutstyr for elbiler til borettslag, bedrifter og kommuner over hele landet."
+        self.assertIsNone(_lead_paragraph_fix(text, self.soup(f"<p>{text}</p>")))
+
+    def test_a_paragraph_across_an_inline_tag_keeps_the_whole_sentences_of_its_first_node(self):
+        from norway_company_agent.website import _lead_paragraph_fix
+        html = ("<p>Serit er en nasjonal leverandør, med kompetanse lokalt. Med tydelig tilstedeværelse gjør vi IT til et "
+                "konkurransefortrinn for alle typer <strong>bedrifter</strong>. Vi har 27 kontorer.</p>")
+        text = ("Serit er en nasjonal leverandør, med kompetanse lokalt. Med tydelig tilstedeværelse gjør vi IT til et "
+                "konkurransefortrinn for alle typer bedrifter. Vi har 27 kontorer.")
+        lead = _lead_paragraph_fix(text, self.soup(html))
+        self.assertEqual(lead, "Serit er en nasjonal leverandør, med kompetanse lokalt.")
+        self.assertTrue(any(lead in " ".join(str(n).split()) for n in self.soup(html).find_all(string=True)))
+
+    def test_no_whole_sentence_in_the_first_node_means_no_paragraph(self):
+        from norway_company_agent.website import _lead_paragraph_fix
+        html = "<p>Vi leverer <a href='/x'>maskiner</a> til skog og hage over hele landet, med service og deler i egen verkstedhall.</p>"
+        text = "Vi leverer maskiner til skog og hage over hele landet, med service og deler i egen verkstedhall."
+        self.assertEqual(_lead_paragraph_fix(text, self.soup(html)), "")
+
+    def test_the_contract_uses_the_single_node_text_or_falls_through(self):
+        from norway_company_agent.contract import _company_description
+        about = {"url": "https://www.example.no/om-oss", "main_text_excerpt": "x " * 60}
+        home = {"main_text_excerpt": ("Testselskap Nord leverer ladeutstyr for elbiler til borettslag, bedrifter og kommuner "
+                                      "over hele landet, med egen montørstab.")}
+        web_val = {**home, "pages": [{"url": "https://www.example.no/"}, {**about, "lead_paragraph": "Serit er en nasjonal leverandør, med kompetanse lokalt."}]}
+        self.assertEqual(_company_description(web_val, "https://www.example.no/"),
+                         ("Serit er en nasjonal leverandør, med kompetanse lokalt.", "https://www.example.no/om-oss"))
+        web_val["pages"][1]["lead_paragraph"] = ""
+        self.assertEqual(_company_description(web_val, "https://www.example.no/")[1], "https://www.example.no/")
+        web_val["lead_paragraph"] = ""
+        self.assertEqual(_company_description(web_val, "https://www.example.no/"), (None, None))

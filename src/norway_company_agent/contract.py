@@ -722,13 +722,21 @@ def _company_description(web_val: dict[str, Any], web_url: str) -> tuple[str | N
     pages = web_val.get("pages") or []
     for page in pages[1:]:
         if ABOUT_PATH.search(str(page.get("url") or "")):
-            text = _first_paragraph(page.get("main_text_excerpt") or "")
+            text = _page_paragraph(page)
             if text:
                 return text, page.get("url")
-    text = _first_paragraph(web_val.get("main_text_excerpt") or "")
+    text = _page_paragraph(web_val)
     if text:
         return text, web_url
     return None, None
+
+
+def _page_paragraph(page: dict[str, Any]) -> str | None:
+    """The page's first substantive paragraph, or, where the crawl found that paragraph's span outside
+    any single text node of the page, the whole sentences of the node where it starts (or none)."""
+    if page.get("lead_paragraph") is not None:
+        return page["lead_paragraph"] or None
+    return _first_paragraph(page.get("main_text_excerpt") or "")
 
 
 def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, entity_ev, deadline_hit) -> None:
