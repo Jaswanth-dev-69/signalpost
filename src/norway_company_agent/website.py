@@ -155,7 +155,10 @@ def _social_links(base_url: str, soup: BeautifulSoup) -> list[dict[str, str]]:
     return [{"platform": item["platform"], "url": item["url"]} for item in _social_links_raw(base_url, soup)]
 
 
-def structured_social_links(value: Any) -> list[dict[str, str]]:
+def structured_social_links(value: Any, printed_in: str | None = None) -> list[dict[str, str]]:
+    """Social profiles named in structured data (JSON-LD/microdata sameAs). With `printed_in` (the
+    page's HTML) each link carries the URL exactly as the page prints it in "href" (plain or with
+    JSON-escaped slashes), and a link the page does not print verbatim is left out."""
     found: dict[tuple[str, str], dict[str, str]] = {}
 
     def walk(node: Any) -> None:
@@ -166,8 +169,14 @@ def structured_social_links(value: Any) -> list[dict[str, str]]:
                 if not isinstance(raw, str):
                     continue
                 normalized = normalize_social_url(raw.strip())
-                if normalized:
-                    found[(normalized["platform"], normalized["url"])] = normalized
+                if not normalized:
+                    continue
+                if printed_in is not None:
+                    printed = next((form for form in (raw.strip(), raw.strip().replace("/", "\\/")) if form and form in printed_in), None)
+                    if not printed:
+                        continue
+                    normalized = {**normalized, "href": printed[:300]}
+                found.setdefault((normalized["platform"], normalized["url"]), normalized)
             for child in node.values():
                 walk(child)
         elif isinstance(node, list):
@@ -439,10 +448,7 @@ def _fetch_website_once(url: str | None, *, timeout: float = 15.0, max_bytes: in
             "retrieved_at": fetched_at,
         }]
         social = [{**item, "found_on_page": final_url} for item in _social_links_raw(final_url, soup)]
-        social.extend(
-            {**item, "href": item["url"], "found_on_page": final_url}
-            for item in structured_social_links(structured)
-        )
+        social.extend({**item, "found_on_page": final_url} for item in structured_social_links(structured, printed_in=html))
         requests = 2
         bytes_received = len(raw)
         page_latencies = [elapsed]

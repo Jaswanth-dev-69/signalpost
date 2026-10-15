@@ -140,3 +140,15 @@ class DeclaredSocialLinks(unittest.TestCase):
         self.assertEqual([i["url"] for i in items], ["https://facebook.com/grenlandutleie", "https://instagram.com/grenlandutleie"])
         for item in items:
             self.assertIn(item["href"], html)
+
+    def test_structured_data_profiles_are_quoted_as_printed(self):
+        import json
+        from norway_company_agent.website import structured_social_links
+        html = ('<script type="application/ld+json">{"@type":"Organization","sameAs":["https://www.facebook.com/t2prosjekt",'
+                '"https:\\/\\/www.linkedin.com\\/company\\/t-2-prosjekt\\/"]}</script>')
+        data = [json.loads(html[html.index("{"):html.rindex("}") + 1])]
+        items = structured_social_links(data, printed_in=html)
+        self.assertEqual([i["url"] for i in items], ["https://facebook.com/t2prosjekt", "https://linkedin.com/company/t-2-prosjekt"])
+        for item in items:
+            self.assertIn(item["href"], html)
+        self.assertEqual(structured_social_links(data, printed_in="<html></html>"), [])  # not printed verbatim: left out
