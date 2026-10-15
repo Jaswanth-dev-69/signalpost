@@ -209,6 +209,12 @@ replacement: identical apart from the description claim, its evidence and the su
 27/27 by content). Schema 0, claim audit 0, summary validator 0 on all three sets; regression guard
 (`--base 0ca6042 --new 48dc33d`, replacement removed from the live profiles) clean on all three.
 
+Audits on `v7a`: precision audit (sample-100, 100 claims) 100/100 supported, **0 wrong-company**, web
+spans 18/18 on the page; evidence audit (proxy-200, seed 20261020, 100 claims, 159 evidence items, all
+loaded) span verbatim **100.0%** against 99.4% for `v6a` with the same seed re-run the same night (its
+one miss: the serit.no description, fixed here); wrong-company red team (35 companies) 0 false
+positives.
+
 ## Step 2A. Permitted discovery audit (text re-read 15 Oct; pages unchanged since 14 Oct)
 
 | Method | Permitting text (quoted) | Sized | Verdict |
@@ -227,6 +233,19 @@ organisation number and no legal name with municipality (7), share their name to
 entity in the municipality (nordicdoor.no) or print another organisation number (storebrand.no, the
 group's). So the method the contract permits for those 11 (search APIs, candidates only) is capped at
 +2 websites on sample-100 by our gate, which stays as is.
+
+Same bound on a larger labelled population (`eval/discovery_labelled.py`, table rebuilt from the frozen
+bulk snapshot: 1,176,492 entities, 78,960 domains declared by exactly one entity; 200 labelled
+companies, strata none/5-19/20-99/100+ = 100/60/30/10, seed 20261016; each treated as declaring
+nothing; challenger = an oracle returning the company's true domain, i.e. a perfect search result):
+the current generator (register e-mail domain and legal-name domains) has a site accepted by the strict
+proof for **58 of 200**; the oracle's true domain loads for 152 and passes the strict proof for
+**64 of 200** (none 16/100, 5-19 33/60, 20-99 11/30, 100+ 4/10; failures: no organisation number and no
+legal name plus municipality 85, another organisation number 4, homonyms 4). A perfect discovery source
+would add **7 companies of 200** (and miss 1 the generator finds). The generator's 9 acceptances of a
+domain other than the declared one are the company's own other sites: 6 print its organisation number
+(retrade.eu, copyleft.no, arvalyd.no, arkivfinnmark.no, dittkontor.no, arbo.no), 3 show its full legal
+name with the registered municipality (csbilnorge.no, sagahouseoslo.com, wenorwegians.no).
 
 ## Step 2B. Match-key audit (news and hiring)
 
