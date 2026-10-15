@@ -1,7 +1,7 @@
 {
   "run_id": "smoke-v5",
-  "started_at": "2026-10-15T04:34:24.995686Z",
-  "completed_at": "2026-10-15T04:38:33.881154Z",
+  "started_at": "2026-10-15T12:44:20.726776Z",
+  "completed_at": "2026-10-15T12:48:39.323290Z",
   "expected_count": 100,
   "emitted_envelopes": 100,
   "modules": [
@@ -21,31 +21,31 @@
     "selected": 100
   },
   "operations": {
-    "requests": 869,
-    "bytes": 38417852,
+    "requests": 860,
+    "bytes": 36771667,
     "declared_domain_counts": {
       "status": "ok",
       "error": null,
       "domains": 84688,
-      "seconds": 10.5,
+      "seconds": 10.7,
       "effect": null
     },
     "nav_job_index": {
-      "active_ads": 13118,
-      "entries_fetched": 9888,
-      "closed_ads": 3230,
+      "active_ads": 13525,
+      "entries_fetched": 10190,
+      "closed_ads": 3335,
       "errors": 0,
       "http_429": 0,
       "complete": true,
-      "employers_indexed": 6104,
+      "employers_indexed": 6299,
       "failed": null,
       "companies_with_postings": 0
     },
     "p50_ms": 203,
-    "p95_ms": 1950,
+    "p95_ms": 2043,
     "http_429_registry": 0,
     "http_429_web": 0,
-    "wall_time_s": 249.3
+    "wall_time_s": 258.9
   },
   "validation": {
     "passed": true,

@@ -4,6 +4,9 @@ Started 14 Oct 2026 18:31 IST from `main` = `956f53be` (tag `pre-v5`, pushed). D
 final push and report: 17 Oct 18:00 IST. Evidence (30.00) is the invariant: identity gate
 unchanged, 0 wrong-company, red team 0/35, every span verbatim, every fact with evidence.
 
+Earlier versions: v1 `31cf2983`, v2 `0ded7110` (tag `v2-submitted`), v3 `6074351` (tag
+`v3-submitted`), v4 `956f53be` (tag `pre-v5`).
+
 Scoring context (user): C300 directional estimate Recall 14.34, Evidence 30.00, Synthesis 7.20,
 UX 2.67 (54.21). Board (5 Oct): v2 Synthesis 12 and UX 8. Board grades are multiples of 2.4
 (Synthesis, five levels) and 1.6 (UX); 7.20 is level 3 of 5. Soham: "No dated-news item matched the
@@ -481,6 +484,16 @@ Why the rest is not reachable within the rules:
   (`company_orgnrs`), so there is no gain there either. LinkedIn: `robots.txt` is
   `User-agent: * / Disallow: /` and Builderr's sources brief forbids scraping that robots prohibit.
 
+### Final set-300 check of the submission code (`be92b6c`, 15 Oct, live; agent code = `c9f2049`)
+
+| Check | Result |
+|---|---|
+| Full run, set-300 | exit 0, **295 s** wall (293.9 s inside the agent), 300/300 envelopes, 0 tracebacks, 0 deadline notes, peak RSS **0.67 GB**; schema 0, claim audit 0, summaries 300/300 traceable, zero silent drops |
+| Forced hard deadline (`--hard-deadline 75`, set-300) | exit 0 in **47 s**, 300/300 envelopes, each with the deadline note (the 90 s web reserve exceeds the deadline, so the web pass is skipped), schema 0, claim audit 0, summaries 300/300, viewer written (2.9 MB, loads without errors); peak RSS 0.21 GB |
+| 1,500 projection (`.work/tools/cost.py`) | **1,206 s** (3,946 requests, web pass 231.5 s); 1,119–1,185 s on the gate runs above, so 1,119–1,206 s over the live runs |
+| Viewer, set-300 | 3.40 MB; headless Chrome ready in 0.35 s desktop, 0.21 s phone; all checks pass, 0 errors |
+| Viewer, 1,500 companies (offline build from these profiles, ×5) | **16.75 MB**, built in 1.4 s; ready in 0.68 s desktop, 0.55 s phone; all checks pass, 0 errors |
+
 ## Packaging (15 Oct 2026, final)
 
 - Agent code of v5: `c9f2049e25dd7ed3e6d64f6ae5ad2e31e081378e` (pushed; `5f688f9` was the previous
@@ -492,7 +505,13 @@ Why the rest is not reachable within the rules:
   checks pass. Same published facts as the `5f688f9` smoke run (website 8, social 2, dated news 3; the
   list is web-sparse). `docs/smoke-test/` regenerated from that run (README, envelopes, report, input
   list and `smoke-viewer.html`).
-- Submission commit: the `main` commit that carries that smoke test (docs only on top of `c9f2049`).
+- Cold-cache fresh clone of **`be92b6c85d0eaf3f78ec573944dedc4872d1d7eb`** (docs only on top of
+  `c9f2049`, so the same agent code) from GitHub, same procedure: `uv sync` exit 0 (3 s), the one
+  command on the 100-company smoke list **exit 0** in 261 s, **100/100 envelopes**, **schema validator 0
+  errors**, summaries 100/100 traceable, claim audit 0 issues, precision audit 100/100 with 0
+  wrong-company (web spans 12/12), headless viewer checks pass. Same published facts (website 8,
+  social 2, dated news 3). `docs/smoke-test/` regenerated from this run and cites v5 and this hash.
+- Submission commit: the `main` commit that carries that smoke test (docs only on top of `be92b6c`).
   Email draft `docs/V5_EMAIL.md` (hash and contact as placeholders); a filled copy is kept outside the
   repository. Nothing has been sent.
 
