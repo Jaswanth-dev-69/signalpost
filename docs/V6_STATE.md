@@ -175,3 +175,95 @@ Of Builderr's 16 kit news facts, v6 matches 9 exactly; of the other 7, 3 are sit
 - Unchanged by design: websites, social profiles and every claim (identity gate untouched).
 - Not established: which read path Builderr's scorer uses for news and hiring; v6 helps only if it
   includes kit-read company-site news, and is equal to v5 otherwise.
+
+# v6 round 2 (started Thu 15 Oct 23:03 IST from `85a544c`, the fallback; hash decision 16 Oct 13:00 IST)
+
+## Step 1. Evidence: single-node description spans (code `48dc33d`, built)
+
+Where description spans are built: `contract._company_description` takes, in order, the meta
+description, a JSON-LD Organization description, the first substantive paragraph of an about page,
+then of the homepage; the evidence span is the first 400 characters. The two paragraph sources come
+from extracted text that joins inline elements, so a paragraph can cross tags.
+
+Fix: at crawl time (`website._lead_paragraph_fix`, homepage and identity pages) the paragraph the
+contract would quote is checked against the page's own text nodes. When its span lies inside one node
+nothing is recorded and the contract behaves exactly as before; otherwise the crawl records the whole
+sentences (40+ characters) of the node where the paragraph starts, or nothing, and the contract uses
+that or falls through to the next source (`contract._page_paragraph`).
+
+Live census of every published description span (one text node or one attribute value of the live
+page, the census's definition), same day:
+
+| Set | before (`v6a`, code `aba41ad`) | after (`v7a`, code `48dc33d`) |
+|---|---|---|
+| sample-100 | 65 of 66 in one node | **66 of 66** |
+| proxy-200 | 39 of 41 | **40 of 40 loaded** (41 published; 1 page did not load at census time) |
+| set-300 | 79 of 82 | **81 of 81** |
+
+Descriptions changed only for the 6 companies that failed before (identical for 99/100, 198/200,
+297/300): brannkontrollnorge.no, p22.no, serit.no and ressurscompagniet.no now quote the homepage's
+first paragraph (single node); bakkemaskin.no keeps its first two sentences, now single-node;
+bjornebarstien.no publishes no description (no single-node paragraph). Their summaries change with
+the description they quote; nothing else changes (envelopes built with and without the crawl's
+replacement: identical apart from the description claim, its evidence and the summary, 13/13, 16/16,
+27/27 by content). Schema 0, claim audit 0, summary validator 0 on all three sets; regression guard
+(`--base 0ca6042 --new 48dc33d`, replacement removed from the live profiles) clean on all three.
+
+## Step 2A. Permitted discovery audit (text re-read 15 Oct; pages unchanged since 14 Oct)
+
+| Method | Permitting text (quoted) | Sized | Verdict |
+|---|---|---|---|
+| Official registers (Enhetsregisteret, Regnskapsregisteret, roles, subunits) | Sources brief: "Brønnøysundregistrene Enhetsregisteret bulk data and entity API …", "Regnskapsregisteret API and annual-account copies …", "Official roles endpoints …", "Official subunit records …"; "Official data is the identity anchor. It does not, by itself, identify the public brand or website." | in use (register homepage; register e-mail domain and legal-name domains under the strict proof; subunit homepages sized in v5 H7: 4/295) | no new method |
+| Company-owned sources | "Verified official website", "Sitemap, news, investor, careers, location and contact pages", "Structured data embedded by the company", "Social or video profiles linked by the verified company site, subject to the destination platform's access terms" | in use | no new method |
+| Search APIs | Sources brief: "Search APIs used to discover candidates"; "Search results generate candidates; they are not claim evidence." Playbook: "Search/discovery providers for candidate generation only"; "Each run has a small external API budget, and if you need a model key for scoring, ask and we will supply one. What we cannot use is a credential tied to your own account on another service". Kit README: "lawful search providers"; kit `docs/external-connectors.md`: "Search is only for an entity whose registry website is absent, invalid, or dead. Recommended production path: a separately contracted Brave Search API connector …". Contract: "server-side secrets supplied through documented environment variables only". | upper bound below | **not buildable here**: needs a provider key; the text offers a model key on request and forbids personal credentials; no key is available and asking Builderr is an e-mail |
+| Official or licensed platform APIs; licensed news/review/jobs/company-data feeds | Sources brief, "External sources" | — | need contracts or keys: not available |
+| Public pages whose terms and robots permit the access (directories) | "Public pages whose terms and robots policy permit the submitted access pattern" | proff.no: CDN blocks this country (403); gulesider.no: bot challenge (bypass forbidden); 1881.no and purehelp.no: robots allow company pages, terms not confirmed | rejected (and bounded below) |
+
+**Upper bound for any discovery source, measured.** For the 11 exact websites in Builderr's sample that
+no register (bulk, live, universe file) lists and that we miss, we fetched Builderr's own domain as if
+a perfect source had supplied it and applied the unchanged strict proof for discovered domains: **2 of
+11 pass** (ts-vestfold.no and pe-gaarud.no print the organisation number). The other 9 print no
+organisation number and no legal name with municipality (7), share their name tokens with another
+entity in the municipality (nordicdoor.no) or print another organisation number (storebrand.no, the
+group's). So the method the contract permits for those 11 (search APIs, candidates only) is capped at
++2 websites on sample-100 by our gate, which stays as is.
+
+## Step 2B. Match-key audit (news and hiring)
+
+Every verified Builderr fact we have: v1 feedback (`../TASK.md`): dated news missed `813396092 ->
+https://www.bori.no/aktuelt` (a news listing page), jobs missed `838797172 ->
+https://www.granne.no/ledige-stillinger` (a careers page); v2 feedback (`docs/SCORER_NOTES.md`):
+`elopak.com`, `facebook.com/mtmskogservice`, `https://www.equinor.com/careers`,
+`bedre sosial funksjon etter hjerneskade (2025-09-22t20:00:00+02:00)`; Soham: "Capture title, direct
+URL, publication date, and exact company match"; Builderr's sample rows (LinkedIn posts: `source`,
+`date_published` full ISO datetime; jobs: `job_url`, `date_posted`); the kit's observation schema
+(`validate_observation`) and news reader (deepest news-path page, `source_url`, title span).
+
+| Needed | Ours (v6 runs, three sets) | Result |
+|---|---|---|
+| News key `lowercase(title + " (" + datetime with offset + ")")` | `dated_news` value `Title (published_at)`, published_at as printed | same shape |
+| Title, direct URL, publication date, organisation number | claim `title`, `url`, `published_at`, `organisation_number`: complete on every item | match |
+| Full datetime where the page has one | 845 of 985 items carry a full datetime; for the 140 date-only items, 81 article pages loaded and none prints a full datetime for that day (meta, JSON-LD, `<time>`); 59 not fetched in the check | no mismatch |
+| Same datetime in every shape | `external.company_site.posts.date_published` and the observation `published_at` equal the claim's for 320/320, 263/263, 262/262 datetime items | match |
+| News listing page (v1 example) | in the kit profile's `pages` since v6 L1/L2 | match |
+| Hiring = careers page URL (v1, v2 examples) | `hiring_signal` value = careers page URL; `company_site.jobs.job_url`; observation `source_url` | match |
+| Observation schema | news and hiring observations pass the kit's `validate_observation` | match |
+
+No mismatch found; nothing changed.
+
+## Step 2C. How the verified pool is built (contract text only)
+
+- "We combine independently checked findings from all submissions and Builderr's own crawlers into one
+  reference collection. New verified findings update the collection, and every entrant is rescored
+  against the same version. This is the checked information we have found, not a claim that we found
+  everything online."
+- "For every external field family, coverage is 70% company recall and 30% individual-claim recall
+  against the independently verified union of discoveries from every submitted crawler and Builderr's
+  own crawlers. The union is cumulative and versioned: each verified addition creates a new pool hash
+  and every entrant is rescored against that same latest version. The final union freezes only after
+  all eligible final submissions have been verified."
+- "Completed runs add to a cumulative, locked checked reference set used when scores are updated."
+- "Abstention is reported separately and cannot satisfy coverage."
+- Which of our facts can enter: by the text, any published finding in an external field family that
+  Builderr independently checks. The text does not list the families, the read path or the checking
+  method.
