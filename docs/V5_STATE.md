@@ -429,6 +429,41 @@ Known residual (unchanged since earlier versions): a homepage that prints no tex
 rendered site whose register-listed domain carries the legal name) has its URL as the website span;
 1 of 71 verified websites on sample-100.
 
+### Recall measured against Builderr's own sample facts (15 Oct, final code)
+
+`eval/scorer_mirror.py` with Builderr's published sample rows for the 100 sample companies as the
+only collection (`--sample .work/sets/sample100.json --no-pool`, kit read mode). These are Builderr's
+own facts: websites for 97 companies, social profiles for 44, LinkedIn posts for 17 (139 posts) and
+LinkedIn jobs for 2 (8 jobs), the last two marked `experimental`.
+
+| Run | Recall | website (companies) | social (companies, facts) | news | hiring |
+|---|---|---|---|---|---|
+| v2 (`0ded711`) | 9.02 | 70/97 | 0/44 | 0/17 | 0/2 |
+| v3 (`6074351`) | 17.15 | 66/97 | 30/44, 65/91 | 0/17 | 0/2 |
+| v4 = main (`956f53b`) | 20.07 | 74/97 | 37/44, 77/91 | 0/17 | 0/2 |
+| **v5 final (`c9f2049`, run `vf2`)** | **20.07** | 74/97 | 37/44, 77/91 | 0/17 | 0/2 |
+
+On Builderr's own facts the final output reaches Recall 20.07; with Evidence 30, Synthesis 12 and UX 8
+that is a total of about 70. Calibration: v2's official 8.05 reads 9.02 here, and the official C300
+estimate of 14.34 (v3 or v4) reads 17.15–20.07 here, so this measure runs about 1–6 points above the
+official scorer, whose verified union also holds other crawlers' facts. Expected official Recall
+therefore stays at case A ≈ 14 (13–17) unless our news and hiring items enter the verified union
+(case B, 26–34).
+
+Why the rest is not reachable within the rules:
+- Websites (23 missed): 8 are sites Builderr itself does not rate as exact. Of the 15 it rates exact,
+  11 have no homepage in the register (bulk or live) or in Builderr's universe file, so Builderr found
+  them by its own discovery (domain generation is ruled out); 1 register domain times out in every
+  run (`tgsnopec.com`; the live site is `tgs.com`); 1 we verify under another domain (`studix.no`
+  against `studix.com`); 2 are held back by the identity gate (a chain site and a managing agent's
+  site), which stays as is.
+- Social (7 missed companies): all belong to those missing or held-back websites.
+- News and hiring: Builderr's facts are LinkedIn posts and jobs. **H20/H21** (LinkedIn post and job
+  links published only when the company's own verified site links to them, LinkedIn never fetched):
+  of 71 verified sites, 1 links any LinkedIn post or job and 0 link the ones Builderr lists, so
+  **rejected** (0 measured gain). The kit's LinkedIn guest-jobs connector is not used (LinkedIn
+  robots.txt, browser-like user agent, our source rules).
+
 ## Packaging (15 Oct 2026, final)
 
 - Agent code of v5: `c9f2049e25dd7ed3e6d64f6ae5ad2e31e081378e` (pushed; `5f688f9` was the previous
