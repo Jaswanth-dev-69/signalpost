@@ -97,3 +97,58 @@ shows 32 whose article loads and prints title and date (slow sites that exhauste
 budget before the upgrade fetch, v5 H16), 25 not fetchable (robots, errors, off-domain) and 6 whose
 article does not print the feed's title. Their key fields are already complete, so no recall change
 is expected: sized only.
+
+## 3. Built: L1 + L2 (commit `aba41ad`), live gate 15 Oct (runs `v6a`, `detv6`)
+
+Code: `contract.py` 6c puts every news page the news pass checked on a verified site into the kit
+profile's bounded `pages` (also without published items), and, when none lies on the kit reader's
+news path, the newest published article that does (L1); `webclaims.discover_news` reads, when neither
+a checked page nor a published article lies on that path, the homepage link the kit's crawl would
+take (`kit_news_link`: same host, kit term order, then URL) and records it as a checked page that no
+claim cites (L2). Only the kit profile changes; claims, evidence, summaries and the viewer do not.
+
+| Measure | sample-100 | proxy-200 | set-300 |
+|---|---|---|---|
+| Kit-read company-site news companies, v5 → v6 (live) | 11 → **30** (+19, 0 lost) | 12 → **22** (+10, 0 lost) | 17 → **25** (+8, 0 lost) |
+| Claims families, companies/facts v5 → v6 (website, social, news, hiring) | 71/71, 40/84, 32/373 → 32/374, 20/24: unchanged | 44/44, 21/41 → 21/40, 22/271 → 22/272, 16/17: unchanged | 83/83, 47/89, 31/339, 16/43: identical |
+| Companies where L2 fired | 7 | 3 | 1 |
+
+v5 baselines: `vf2` (sample-100, proxy-200) and `be92` (set-300), same day. Noise floor about 2
+companies per family per 300.
+
+Recall on Builderr's own sample facts (`eval/scorer_mirror.py --sample … --no-pool`, sample-100):
+
+| Read assumption | v5 | v6 |
+|---|---|---|
+| kit profile, pool without kit company-site news | 20.07 | 20.07 |
+| kit profile, pool with kit company-site news (`--kit-news`) | 20.72 (news 2/29) | **23.00** (news 9/29) |
+| kit profile + claims, with kit news | 21.70 (news 5/29) | **23.33** (news 10/29) |
+
+Of Builderr's 16 kit news facts, v6 matches 9 exactly; of the other 7, 3 are sites we do not verify
+(atea, nordicdoor, st-olav), 3 are specific articles Builderr's crawl caught on its own crawl date
+(prereg, kitron, bien) and 1 site gave no kit page in this run (avogpaa).
+
+### Push gate (`aba41ad`)
+
+| Check | Result |
+|---|---|
+| Unit tests | 220 pass (213 + 7 new in `tests/test_v6.py`) |
+| Schema / claim audit / summary validator | 0 / 0 / 0 on sample-100, proxy-200, set-300 and set-1500 |
+| Regression guard `c9f2049` → `aba41ad` on the live profiles (L2's pages removed, since base code would cite them) | clean on all three sets |
+| L2 isolation (envelopes built with and without L2's page) | identical apart from the kit page and the crawl record that lists it: 7/7, 3/3, 1/1 |
+| Summaries and viewer (offline, v5 vs v6 code on the same profiles) | summaries identical 600/600; viewer HTML byte-identical on all three sets |
+| Added kit pages re-fetched (110 pages) | title verbatim 110/110 (one text node 107/110) |
+| precision_audit (100 claims, sample-100) | 100/100 supported, **0 wrong-company**, web spans 17/17 |
+| evidence_audit (100 claims, proxy-200) | 99.4%: the one miss is serit.no's company description, whose 166-character span joins "bedrifter" and "." across an inline tag (page text "bedrifter ."); identical claim and value in every v5 run, not touched by v6 (the description residual noted in the v4/v5 censuses) |
+| External span census, set-300 (2,696 spans) | 99.3% one node, 99.7% visible (v5: 99.3% / 99.7%) |
+| Red team | 0/35 |
+| Determinism pair (`detv6`, proxy-200) | 0 duplicates, 0 change events, refresh 0 material; non-summary claims identical 198/200: serit.no serves titles with and without " - Serit" (as in v4/v5), and fodebagen.no's homepage led the news pass to a page-2 collection link in the second run (site variance in pre-existing code) |
+| Runtime, 1,500 projection | 1,130 s (proxy-200), 1,223 s (sample-100), 1,224 s (set-300); +8, −13, +3 requests vs v5 |
+
+## 4. Scale (`aba41ad`, live)
+
+| Run | Result |
+|---|---|
+| set-1500 (`eval/fixture_proxy.py`, seed 20261015, 43% register homepages) | exit 0, **721 s wall** (pass 1 95 s, web pass ends 686 s), 1,500/1,500 envelopes, 0 tracebacks, 0 deadline notes, peak RSS **1.00 GB**; 18,936 requests, p50 208 ms, p95 2.5 s, HTTP 429 web 11, registry 0; schema 0, claim audit 0, summaries 1,500/1,500 traceable |
+| Viewer, 1,500 companies | 16.7 MB; ready 0.65 s desktop, 0.54 s phone; all headless checks pass |
+| Forced hard deadline (`--hard-deadline 75`, set-300) | exit 0 in 46 s, 300/300 envelopes, peak RSS 0.21 GB |
