@@ -366,3 +366,23 @@ run 684 s and 0.99 GB (`v6a` 721 s and 1.0 GB); every other claim unchanged (reg
 summaries and the viewer changed only as listed under step 3, with the validator, the guard and the
 headless checks clean. The blind review graded the summaries before the step-3 fixes; the fixes
 themselves were not reviewed again (one round allowed).
+
+## Packaging (16 Oct 2026, round 2)
+
+Pushed `122030b` to `main` (fast-forward from `85a544c`; agent code `481509c`; tags unchanged).
+Cold-cache fresh clone of `122030b` from GitHub (empty `UV_CACHE_DIR`, no virtualenv): `uv sync` exit 0
+in 2 s; the one command on the 100-company smoke list exit 0 in 251 s; 100/100 envelopes; schema 0;
+summaries 100/100 traceable (validator 0 errors); claim audit 0; precision audit 100/100 supported,
+**0 wrong-company**, web spans 12/12; the run's viewer passes the headless checks (1.03 MB, ready
+0.23 s). `docs/smoke-test/` regenerated from that run. Nothing outside `docs/` differs between
+`481509c` and the commits after it.
+
+## Status (16 Oct 2026, round 2)
+
+- Built and gated: step 1 (single-node descriptions, `48dc33d`) and step 3 (deterministic summary and
+  viewer fixes from the one blind review, `ab5bcca`, `481509c`).
+- Sized only: step 2A (permitted discovery: search APIs need a key we may not use; directories blocked
+  or terms unconfirmed; a perfect source would add at most 2 of sample-100 and 7 of 200 labelled
+  companies under the strict proof), 2B (no match-key mismatch), 2C (pool shape from contract text).
+- Not established: which read path Builderr's scorer uses for news and hiring; whether our facts are
+  verified into the pool; how the official grader scores summaries and the viewer.
