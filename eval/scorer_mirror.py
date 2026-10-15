@@ -17,6 +17,11 @@ Read modes (how the scorer is assumed to read an envelope):
   auto     kit if the envelope has a profile, else scalar (what v2's 0.0% social suggests).
   hedge    kit, plus news and hiring from external.observations (the kit's observation records).
 
+--kit-news adds, on both sides, the one company-site news fact the kit's own reader
+(`scripts/extract_company_site_news.py`) derives from a profile's bounded `pages`: the deepest
+news-path page of a publishable website, keyed by its URL. Builderr's sample rows carry such pages
+from Builderr's own crawler, so this models a pool that also holds kit-read company-site news.
+
 Usage:
   python eval/scorer_mirror.py --anchors        (what the official anchors imply)
   python eval/scorer_mirror.py --orgs ORGS.txt --run kit=KIT.jsonl:kit --run v2=V2.jsonl:auto \
@@ -32,6 +37,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from kit_parity import domain, read_jsonl, social_key  # noqa: E402
+
+def _kit_news_reader():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("kit_site_news", Path(__file__).resolve().parents[1] / "scripts" / "extract_company_site_news.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.observation
+
+
+def kit_news_fact(profile: dict | None, org: str) -> str | None:
+    """The kit reader's company-site news fact for one profile (deepest news-path page URL)."""
+    if not profile:
+        return None
+    item = _kit_news_reader()({"organisation_number": org, **profile})
+    return str(item["source_url"]).rstrip("/").casefold() if item else None
+
 
 FAMILY_KEYS = {"website": "website", "social": "social_profile", "news": "dated_news", "hiring": "hiring_signal",
                "description": "description"}
@@ -118,7 +139,7 @@ def read_facts(envelope: dict, mode: str) -> dict[str, set]:
     raise SystemExit(f"unknown read mode {mode}")
 
 
-def sample_collection(rows: list[dict], website: str) -> dict[str, dict[str, set]]:
+def sample_collection(rows: list[dict], website: str, kit_news: bool = False) -> dict[str, dict[str, set]]:
     out: dict[str, dict[str, set]] = {}
     for row in rows:
         facts: dict[str, set] = defaultdict(set)
@@ -141,6 +162,10 @@ def sample_collection(rows: list[dict], website: str) -> dict[str, dict[str, set
             facts["dated_news"].add(str(post.get("source")).rstrip("/").casefold())
         for job in linkedin.get("jobs") or []:
             facts["hiring_signal"].add(str(job.get("job_url")).rstrip("/").casefold())
+        if kit_news:
+            fact = kit_news_fact({"evidence": {"website": web}}, str(row["org"]))
+            if fact:
+                facts["dated_news"].add(fact)
         out[str(row["org"])] = facts
     return out
 
@@ -193,6 +218,7 @@ def main() -> int:
     parser.add_argument("--collection-website", choices=["any", "exact"], default="any")
     parser.add_argument("--no-pool", action="store_true", help="collection = sample only")
     parser.add_argument("--json")
+    parser.add_argument("--kit-news", action="store_true", help="add the kit reader's company-site news fact on both sides")
     args = parser.parse_args()
     orgs = [line.strip() for line in Path(args.orgs).read_text().splitlines() if line.strip()]
     families = args.families.split(",")
@@ -200,10 +226,17 @@ def main() -> int:
     for spec in args.run:
         name, rest = spec.split("=", 1)
         path, mode = rest.rsplit(":", 1)
-        runs[name] = {str(e["organisation_number"]): read_facts(e, mode) for e in read_jsonl(path)}
+        runs[name] = {}
+        for e in read_jsonl(path):
+            org = str(e["organisation_number"])
+            runs[name][org] = read_facts(e, mode)
+            if args.kit_news:
+                fact = kit_news_fact(e.get("profile"), org)
+                if fact:
+                    runs[name][org]["dated_news"].add(fact)
     collection: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
     if args.sample:
-        for org, facts in sample_collection(json.loads(Path(args.sample).read_text(encoding="utf-8")), args.collection_website).items():
+        for org, facts in sample_collection(json.loads(Path(args.sample).read_text(encoding="utf-8")), args.collection_website, args.kit_news).items():
             for key, values in facts.items():
                 collection[org][key] |= values
     if not args.no_pool:

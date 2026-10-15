@@ -31,6 +31,17 @@ SUMMARY_FIELD = "summary_profile"
 # names and the earlier years of the accounts response the agent already fetches).
 ADDED_FIELDS = {"registered_activity", "former_names", "financial_history", "group_accounts", "group_financials"}
 SUMMARY_KEYS = {"summary"}
+# Pages added on purpose in v6 to the kit profile's bounded `pages` (company-site news pages the kit's
+# own news reader reads). Removed from both sides before the profiles are compared.
+ADDED_PAGE_ROLES = {"news_listing", "news_article", "kit_news_link"}
+
+
+def _without_added_pages(profile: dict[str, Any]) -> dict[str, Any]:
+    profile = json.loads(json.dumps(profile))
+    value = (((profile.get("evidence") or {}).get("website") or {}).get("value") or {})
+    if isinstance(value.get("pages"), list):
+        value["pages"] = [page for page in value["pages"] if not (isinstance(page, dict) and page.get("page_role") in ADDED_PAGE_ROLES)]
+    return profile
 T = "2026-10-14T00:00:00Z"
 
 
@@ -90,8 +101,8 @@ def compare(base_env: dict[str, Any], new_env: dict[str, Any]) -> list[str]:
     for key in sorted((set(base_env) | set(new_env)) - {"claims", "evidence", "profile"} - SUMMARY_KEYS):
         if canon(base_env.get(key)) != canon(new_env.get(key)):
             problems.append(f"envelope field changed: {key}")
-    base_profile = {k: v for k, v in (base_env.get("profile") or {}).items() if k != "synthesis_summary"}
-    new_profile = {k: v for k, v in (new_env.get("profile") or {}).items() if k != "synthesis_summary"}
+    base_profile = {k: v for k, v in _without_added_pages(base_env.get("profile") or {}).items() if k != "synthesis_summary"}
+    new_profile = {k: v for k, v in _without_added_pages(new_env.get("profile") or {}).items() if k != "synthesis_summary"}
     if canon(base_profile) != canon(new_profile):
         problems.append("embedded profile changed (other than synthesis_summary)")
     return problems

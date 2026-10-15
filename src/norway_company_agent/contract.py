@@ -7,7 +7,7 @@ import urllib.parse
 from typing import Any
 
 from .batch import evidence_terminal_state
-from .webclaims import MAX_NEWS_ITEMS
+from .webclaims import KIT_NEWS_PATH, MAX_NEWS_ITEMS
 
 BULK_URL = "https://data.brreg.no/enhetsregisteret/api/enheter/lastned/csv"
 # The starter kit's module list; its envelope (run_id, state, modules, profile) is embedded as-is.
@@ -552,21 +552,33 @@ def profile_to_contract_envelope(
 
     # 6c. The kit's own readers find company-site news among the website record's bounded `pages`
     # (news-path pages). Our news is read from listings, feeds and articles fetched separately, so
-    # the listing pages that produced published items are added to that list, with their own hash
-    # and fetch time. Nothing new is claimed; the pages were fetched and the items published above.
+    # every news page the news pass checked on the verified site is added to that list with its own
+    # hash and fetch time, and, when none of them lies on the kit reader's news path, the newest
+    # published article that does. Nothing new is claimed; the pages were fetched above.
     web_record = records.get("website") or {}
     web_value = web_record.get("value") or {}
-    news_listings = [page for page in ((profile.get("web_claims") or {}).get("news") or {}).get("checked_pages") or []
+    news_record = (profile.get("web_claims") or {}).get("news") or {}
+    news_listings = [page for page in news_record.get("checked_pages") or []
                      if isinstance(page, dict) and page.get("url") and _valid_hash(page.get("content_sha256"))]
-    if (news_listings and any(c.get("field") == "dated_news" and c.get("availability") == "available" for c in claims)
-            and web_record.get("status") == "available" and (web_value.get("identity_assessment") or {}).get("publishable")):
+    if web_record.get("status") == "available" and (web_value.get("identity_assessment") or {}).get("publishable"):
         pages = web_value.setdefault("pages", [])
         known = {str(page.get("url")) for page in pages if isinstance(page, dict)}
-        for page in news_listings[:3]:
+        for page in news_listings[:4]:
             if page["url"] not in known and not re.search(r"(feed|rss|atom)(/|\.xml|$)|\.xml$", page["url"], re.I):
                 pages.append({"url": page["url"], "title": " ".join(str(page.get("claim_span") or "").split())[:500],
-                              "content_sha256": page["content_sha256"], "retrieved_at": page.get("retrieved_at"), "page_role": "news_listing"})
+                              "content_sha256": page["content_sha256"], "retrieved_at": page.get("retrieved_at"),
+                              "page_role": page.get("page_role") or "news_listing"})
                 known.add(page["url"])
+        if not any(KIT_NEWS_PATH.search(urllib.parse.urlparse(url).path) for url in known):
+            published = {str(c.get("url")) for c in claims if c.get("field") == "dated_news" and c.get("availability") == "available"}
+            articles = sorted((item for item in news_record.get("items") or [] if isinstance(item, dict) and str(item.get("url")) in published
+                               and _valid_hash(item.get("content_sha256")) and item.get("source_page") == item.get("url")
+                               and KIT_NEWS_PATH.search(urllib.parse.urlparse(str(item.get("url"))).path)),
+                              key=lambda item: str(item.get("published_at") or ""), reverse=True)
+            if articles:
+                newest = articles[0]
+                pages.append({"url": newest["url"], "title": " ".join(str(newest.get("claim_span") or newest.get("title") or "").split())[:500],
+                              "content_sha256": newest["content_sha256"], "retrieved_at": newest.get("retrieved_at"), "page_role": "news_article"})
 
     # 7. Summary profile (synthesis)
     summary_text = profile.get("synthesis_summary")
@@ -875,7 +887,8 @@ def _web_claims(profile, records, add_evidence, add_claim, registry_evidence, en
                               "source_url": item.get("source_page"), "organisation_number": org})
                 news_count += 1
         if not news_count:
-            checked = [add_evidence(p.get("url"), "company_owned", p.get("retrieved_at"), p.get("content_sha256"), p.get("claim_span"), "news_checked") for p in news.get("checked_pages") or []]
+            checked = [add_evidence(p.get("url"), "company_owned", p.get("retrieved_at"), p.get("content_sha256"), p.get("claim_span"), "news_checked")
+                       for p in news.get("checked_pages") or [] if p.get("page_role") != "kit_news_link"]
             add_claim("dated_news", None, "failed" if deadline_hit else "not_available", 0.6, [*checked[:3], web_ev])
 
         # Hiring signal: the careers page on the verified site, then each posting found there or on NAV.

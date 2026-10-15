@@ -39,6 +39,11 @@ NEWS_SEGMENTS = {
     "siste-nytt", "artikler", "artikkel", "aktuelt-og-nyheter", "nyhetsarkiv", "innsikt", "aktueltarkiv", "blogger",
 }
 NEWS_PROBE_PATHS = ("/aktuelt", "/nyheter", "/news", "/blogg", "/presse", "/en/news")
+# The kit's company-site news reader (scripts/extract_company_site_news.py) accepts a page from the
+# website record's bounded `pages` whose path has one of these segments; the kit's crawler fills those
+# pages from the homepage's own links, ranked by these terms in this order and then by URL.
+KIT_NEWS_PATH = re.compile(r"/(?:news|press|aktuelt|nyheter|artikler|blog)(?:/|$)", re.I)
+KIT_NEWS_TERMS = ("news", "press", "aktuelt", "nyheter")
 PLACEHOLDER_TITLES = {"hello world!", "hello world", "hei, verden!", "hei verden!", "hei, verden", "blog title", "post title",
                       "sample page", "eksempelside", "untitled", "uten tittel", "ny side", "new page"}
 NEWS_SKIP_SEGMENTS = {"side", "page", "kategori", "category", "tag", "tags", "author", "forfatter", "feed", "arkiv", "archive"}
@@ -765,6 +770,24 @@ def _next_listing_page(listing_url: str, soup: BeautifulSoup, domain: str) -> st
     return None
 
 
+def kit_news_link(base_url: str, soup: BeautifulSoup) -> str | None:
+    """The news link the kit's bounded crawl would read from this homepage: same host, ranked by the
+    kit's term order and then by URL, on a path the kit's news reader accepts."""
+    base = urllib.parse.urlparse(base_url)
+    candidates: dict[str, int] = {}
+    for anchor in soup.select("a[href]"):
+        parsed = urllib.parse.urlparse(urllib.parse.urljoin(base_url, str(anchor.get("href") or "").strip()))
+        if parsed.scheme not in {"http", "https"} or parsed.netloc.lower() != base.netloc.lower() or not KIT_NEWS_PATH.search(parsed.path):
+            continue
+        haystack = (parsed.path + " " + anchor.get_text(" ", strip=True)).casefold()
+        rank = next((index for index, term in enumerate(KIT_NEWS_TERMS) if term in haystack), None)
+        clean = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path or "/", "", "", ""))
+        if rank is None or clean.rstrip("/") == base_url.rstrip("/"):
+            continue
+        candidates[clean] = min(rank, candidates.get(clean, rank))
+    return min(candidates, key=lambda url: (candidates[url], url)) if candidates else None
+
+
 def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: BeautifulSoup, extra_links: list[tuple[str, str]]) -> dict[str, Any]:
     domain = fetcher.domain
     links = _same_site_links(home["url"], home_soup, domain) + extra_links
@@ -904,6 +927,17 @@ def discover_news(fetcher: SiteFetcher, home: dict[str, Any], home_soup: Beautif
         upgraded.append(item)
     upgraded = clean_news_items(upgraded)
     upgraded.sort(key=lambda item: item["published_date"], reverse=True)
+    # When neither a checked news page nor a published article lies on the kit reader's news path, the
+    # homepage link the kit's crawl would take is read as well and recorded as a checked news page.
+    on_kit_path = [*(page["url"] for page in checked), *(item["source_page"] for item in upgraded)]
+    if not any(KIT_NEWS_PATH.search(urllib.parse.urlparse(url).path) for url in on_kit_path):
+        kit_url = kit_news_link(home["url"], home_soup)
+        if kit_url and kit_url.rstrip("/") not in {page["url"].rstrip("/") for page in checked}:
+            page = fetcher.get(kit_url, "news")
+            if _is_html(page) and registered_domain(page["url"]) == domain and KIT_NEWS_PATH.search(urllib.parse.urlparse(page["url"]).path):
+                title = _title(_soup(page))
+                if title:
+                    checked.append({**_page_ref(page), "claim_span": title, "page_role": "kit_news_link"})
     return {"items": upgraded, "checked_pages": checked}
 
 
